@@ -1,0 +1,14 @@
+prefix=/usr/local
+exec_prefix=${prefix}
+libdir=./with_RPATH
+includedir=/usr/local/include
+
+Name: libavfilter
+Description: FFmpeg audio/video filtering library
+Version: 
+Requires: 
+Requires.private: libswscale >= , libavformat >= , libavcodec >= , libswresample >= 3.9.100, libavutil >=
+Conflicts:
+Libs: -L${libdir}  -lavfilter 
+Libs.private: -pthread -lm
+Cflags: -I${includedir}
