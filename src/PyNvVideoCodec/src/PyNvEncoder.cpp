@@ -581,7 +581,36 @@ void Init_PyNvEncoder(py::module& m)
         .def_readwrite("pictureType", &NvEncOutputBitstream::pictureType)
         .def_readwrite("frameAvgQP", &NvEncOutputBitstream::frameAvgQP)
         .def_readwrite("frameIdxDisplay", &NvEncOutputBitstream::frameIdxDisplay)
-        .def_readwrite("bitstream", &NvEncOutputBitstream::bitstream);
+        .def_readwrite("bitstream", &NvEncOutputBitstream::bitstream)
+        .def("__str__",
+            [](const NvEncOutputBitstream& self)
+            {
+                std::stringstream ss;
+                ss << "NvEncOutputBitstream {\n";
+                ss << "  frameIdx: " << self.frameIdx << "\n";
+                ss << "  hwEncodeStatus: " << self.hwEncodeStatus << "\n";
+                ss << "  outputTimeStamp: " << self.outputTimeStamp << "\n";
+                ss << "  outputDuration: " << self.outputDuration << "\n";
+                ss << "  pictureType: ";
+                switch(self.pictureType) {
+                    case NV_ENC_PIC_TYPE_P: ss << "P (Forward predicted)"; break;
+                    case NV_ENC_PIC_TYPE_B: ss << "B (Bi-directionally predicted)"; break;
+                    case NV_ENC_PIC_TYPE_I: ss << "I (Intra predicted)"; break;
+                    case NV_ENC_PIC_TYPE_IDR: ss << "IDR (IDR picture)"; break;
+                    case NV_ENC_PIC_TYPE_BI: ss << "BI (Bi-directional with Intra MBs)"; break;
+                    case NV_ENC_PIC_TYPE_SKIPPED: ss << "SKIPPED"; break;
+                    case NV_ENC_PIC_TYPE_INTRA_REFRESH: ss << "INTRA_REFRESH"; break;
+                    case NV_ENC_PIC_TYPE_NONREF_P: ss << "NONREF_P"; break;
+                    case NV_ENC_PIC_TYPE_UNKNOWN: ss << "UNKNOWN"; break;
+                    default: ss << "UNDEFINED(" << static_cast<int>(self.pictureType) << ")";
+                }
+                ss << "\n";
+                ss << "  frameAvgQP: " << static_cast<int>(self.frameAvgQP) << "\n";
+                ss << "  frameIdxDisplay: " << self.frameIdxDisplay << "\n";
+                ss << "  bitstream size: " << self.bitstream.size() << " bytes\n";
+                ss << "}";
+                return ss.str();
+            });
 
     py::class_<PyNvEncoder, shared_ptr<PyNvEncoder>>(m, "PyNvEncoder", py::module_local())
         .def(py::init<int, int, std::string,  size_t , size_t,  bool ,std::map<std::string,std::string>>(),
