@@ -405,10 +405,22 @@ const NvEncInputFrame* PyNvEncoder::GetEncoderInput(py::object frame)
     return encoderInputFrame;
 }
 
-std::vector<uint8_t>  PyNvEncoder::Encode(py::object _frame)
+void PyNvEncoder::ConvertFrameNumToTimestamp(std::vector<std::pair<uint64_t, std::vector<uint8_t>>> &vPacket)
+{
+    for(auto& packet : vPacket)
+    {
+        auto found = m_mapFrameNumToTimestamp.find(packet.first);
+        if(found == m_mapFrameNumToTimestamp.end()) {
+            throw std::runtime_error("[BUG] frame number not found in map");
+        }
+        packet.first = found->second;
+        m_mapFrameNumToTimestamp.erase(found);
+    }
+}
+
+std::vector<std::pair<uint64_t, std::vector<uint8_t>>> PyNvEncoder::Encode(py::object _frame, int64_t timestamp_ns)
 {
     py::object frame = _frame;
-    std::vector<std::vector<uint8_t>> vvByte;
 
     if(hasattr(frame, "cuda"))
     {
@@ -426,31 +438,27 @@ std::vector<uint8_t>  PyNvEncoder::Encode(py::object _frame)
 
     NV_ENC_PIC_PARAMS picParam = { 0 };
     picParam.inputTimeStamp = m_frameNum++;
-    
-    m_encoder->EncodeFrame(vvByte, &picParam);
-    
-    std::vector<uint8_t> vOutput; //todo: optimize for zero copy
-    for(auto& vByte : vvByte)
-    {
-        vOutput.insert(vOutput.end(), vByte.begin(), vByte.end());
+
+    // If timestamp_ns is -1, use current time in nanoseconds
+    if (timestamp_ns == -1) {
+        auto now = std::chrono::system_clock::now();
+        auto duration = now.time_since_epoch();
+        timestamp_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count();
     }
+    m_mapFrameNumToTimestamp[picParam.inputTimeStamp] = timestamp_ns;
+
+    std::vector<std::pair<uint64_t, std::vector<uint8_t>>> vOutput;
+    m_encoder->EncodeFrame(vOutput, &picParam);
+    ConvertFrameNumToTimestamp(vOutput);
     return vOutput;
 }
 
-std::vector<uint8_t> PyNvEncoder::Encode()
+std::vector<std::pair<uint64_t, std::vector<uint8_t>>> PyNvEncoder::Encode()
 {
     //flush the encoder
-    std::vector<std::vector<uint8_t>> vvByte;
-    std::vector<uint8_t> vOutput;
-    vvByte.clear();
-
-    m_encoder->EndEncode(vvByte);
-
-    for(auto& vByte : vvByte)
-    {
-        vOutput.insert(vOutput.end(), vByte.begin(), vByte.end());
-    }
-
+    std::vector<std::pair<uint64_t, std::vector<uint8_t>>> vOutput;
+    m_encoder->EndEncode(vOutput);
+    ConvertFrameNumToTimestamp(vOutput);
     return vOutput;
 }
 
@@ -572,12 +580,13 @@ void Init_PyNvEncoder(py::module& m)
             )pbdoc")
         .def(
              "Encode",
-             [](std::shared_ptr<PyNvEncoder>& self, const py::object frame)
+             [](std::shared_ptr<PyNvEncoder>& self, const py::object frame, int64_t timestamp_ns = -1)
              {
-                return self->Encode(frame);
+                return self->Encode(frame, timestamp_ns);
              }, R"pbdoc(
                  Encode frame. Returns encoded bitstream in CPU memory
-                 :param NVCV Image  object or any object that implements__cuda_array_interface 
+                 :param frame: NVCV Image object or any object that implements __cuda_array_interface
+                 :param timestamp_ns: Optional timestamp in nanoseconds. If not provided or -1, current time will be used.
              )pbdoc")
         .def(
              "EndEncode",
