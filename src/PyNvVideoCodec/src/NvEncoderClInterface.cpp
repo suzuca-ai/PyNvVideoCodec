@@ -664,8 +664,6 @@ void NvEncoderClInterface::SetupEncConfig(NV_ENC_CONFIG& config,
     bool is_reconfigure,
     bool print_settings) const {
     if (!is_reconfigure) {
-        config.frameIntervalP = 1;
-        config.gopLength = NVENC_INFINITE_GOPLENGTH;
         config.profileGUID = NV_ENC_CODEC_PROFILE_AUTOSELECT_GUID;
     }
 
@@ -679,6 +677,13 @@ void NvEncoderClInterface::SetupEncConfig(NV_ENC_CONFIG& config,
     auto gop_size = FindAttribute(options, "gop");
     if (!gop_size.empty()) {
         config.gopLength = FromString<uint32_t>(gop_size);
+    } else if (!is_reconfigure) {
+        config.gopLength = NVENC_INFINITE_GOPLENGTH;
+    }
+
+    // If goplength is set to NVENC_INFINITE_GOPLENGTH, frameIntervalP should be set to 1.
+    if (config.gopLength == NVENC_INFINITE_GOPLENGTH) {
+        config.frameIntervalP = 1;
     }
 
     SetupRateControl(config.rcParams, parent_params, is_reconfigure,
