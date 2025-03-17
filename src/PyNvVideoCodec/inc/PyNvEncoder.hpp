@@ -113,7 +113,7 @@ private:
     uint64_t m_frameNum;
     std::unordered_map<uint64_t, uint64_t> m_mapFrameNumToTimestamp;
     NV_ENC_BUFFER_FORMAT m_eBufferFormat;
-    bool m_bUseCPUInutBuffer;
+    bool m_bUseCPUInputBuffer;
 
     const NvEncInputFrame* GetEncoderInput(py::object _frame);
     const NvEncInputFrame* GetEncoderInputFromCPUBuffer(py::array_t<uint8_t, py::array::c_style | py::array::forcecast> _frame);
@@ -125,7 +125,7 @@ protected:
 
 public:
     explicit PyNvEncoder(int width, int height,  std::string format,
-            size_t cudastream, size_t cudacontext, bool bUseCPUInutBuffer,std::map<std::string, std::string> config);
+            size_t cudastream, size_t cudacontext, bool bUseCPUInputBuffer,std::map<std::string, std::string> config);
     PyNvEncoder(PyNvEncoder&& pyenvc);
     PyNvEncoder(PyNvEncoder& pyenvc);
     NV_ENC_REGISTERED_PTR RegisterInputFrame(const py::object obj, const CAIMemoryView frame); 

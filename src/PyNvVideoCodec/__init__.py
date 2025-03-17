@@ -86,7 +86,7 @@ def CreateEncoder(
    width ,
    height,
    fmt ,
-   usecpuinutbuffer,
+   usecpuinputbuffer,
    **kwargs
    ):
     cudacontext = 0
@@ -100,4 +100,4 @@ def CreateEncoder(
 
     optional_args = format_optional_params(kwargs)
 
-    return PyNvEncoder(width, height , fmt, cudacontext, cudastream,  usecpuinutbuffer ,optional_args)
+    return PyNvEncoder(width, height , fmt, cudacontext, cudastream,  usecpuinputbuffer ,optional_args)

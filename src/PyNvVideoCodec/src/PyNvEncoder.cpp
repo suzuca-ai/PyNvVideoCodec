@@ -59,7 +59,7 @@ PyNvEncoder::PyNvEncoder(
         std::string _format,
         size_t  _cudacontext,
         size_t _cudastream,
-        bool bUseCPUInutBuffer,
+        bool bUseCPUInputBuffer,
         std::map<std::string, std::string> kwargs)
 {
     NV_ENC_BUFFER_FORMAT eBufferFormat;
@@ -178,7 +178,7 @@ PyNvEncoder::PyNvEncoder(
     m_width = _width;
     m_height = _height;
     m_eBufferFormat = eBufferFormat;
-    m_bUseCPUInutBuffer = bUseCPUInutBuffer;
+    m_bUseCPUInputBuffer = bUseCPUInputBuffer;
     m_vecFrameObj.clear();
     m_mapPtr.clear();
 }
@@ -429,7 +429,7 @@ std::vector<NvEncOutputBitstream> PyNvEncoder::Encode(py::object _frame, std::op
     }
     else
     {
-        if (!m_bUseCPUInutBuffer)
+        if (!m_bUseCPUInputBuffer)
         {
             throw std::runtime_error("incorrect usage of CPU inut buffer");
         }
