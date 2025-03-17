@@ -405,20 +405,20 @@ const NvEncInputFrame* PyNvEncoder::GetEncoderInput(py::object frame)
     return encoderInputFrame;
 }
 
-void PyNvEncoder::ConvertFrameNumToTimestamp(std::vector<std::pair<uint64_t, std::vector<uint8_t>>> &vPacket)
+void PyNvEncoder::ConvertFrameNumToTimestamp(std::vector<NvEncOutputBitstream> &vPacket)
 {
     for(auto& packet : vPacket)
     {
-        auto found = m_mapFrameNumToTimestamp.find(packet.first);
+        auto found = m_mapFrameNumToTimestamp.find(packet.outputTimeStamp);
         if(found == m_mapFrameNumToTimestamp.end()) {
             throw std::runtime_error("[BUG] frame number not found in map");
         }
-        packet.first = found->second;
+        packet.outputTimeStamp = found->second;
         m_mapFrameNumToTimestamp.erase(found);
     }
 }
 
-std::vector<std::pair<uint64_t, std::vector<uint8_t>>> PyNvEncoder::Encode(py::object _frame, int64_t timestamp_ns)
+std::vector<NvEncOutputBitstream> PyNvEncoder::Encode(py::object _frame, int64_t timestamp_ns)
 {
     py::object frame = _frame;
 
@@ -447,16 +447,16 @@ std::vector<std::pair<uint64_t, std::vector<uint8_t>>> PyNvEncoder::Encode(py::o
     }
     m_mapFrameNumToTimestamp[picParam.inputTimeStamp] = timestamp_ns;
 
-    std::vector<std::pair<uint64_t, std::vector<uint8_t>>> vOutput;
+    std::vector<NvEncOutputBitstream> vOutput;
     m_encoder->EncodeFrame(vOutput, &picParam);
     ConvertFrameNumToTimestamp(vOutput);
     return vOutput;
 }
 
-std::vector<std::pair<uint64_t, std::vector<uint8_t>>> PyNvEncoder::Encode()
+std::vector<NvEncOutputBitstream> PyNvEncoder::Encode()
 {
     //flush the encoder
-    std::vector<std::pair<uint64_t, std::vector<uint8_t>>> vOutput;
+    std::vector<NvEncOutputBitstream> vOutput;
     m_encoder->EndEncode(vOutput);
     ConvertFrameNumToTimestamp(vOutput);
     return vOutput;
@@ -571,6 +571,17 @@ void Init_PyNvEncoder(py::module& m)
                 return ss.str();
             })
         ;
+
+    py::class_<NvEncOutputBitstream>(m, "NvEncOutputBitstream")
+        .def(py::init<>())
+        .def_readwrite("frameIdx", &NvEncOutputBitstream::frameIdx)
+        .def_readwrite("hwEncodeStatus", &NvEncOutputBitstream::hwEncodeStatus)
+        .def_readwrite("outputTimeStamp", &NvEncOutputBitstream::outputTimeStamp)
+        .def_readwrite("outputDuration", &NvEncOutputBitstream::outputDuration)
+        .def_readwrite("pictureType", &NvEncOutputBitstream::pictureType)
+        .def_readwrite("frameAvgQP", &NvEncOutputBitstream::frameAvgQP)
+        .def_readwrite("frameIdxDisplay", &NvEncOutputBitstream::frameIdxDisplay)
+        .def_readwrite("bitstream", &NvEncOutputBitstream::bitstream);
 
     py::class_<PyNvEncoder, shared_ptr<PyNvEncoder>>(m, "PyNvEncoder", py::module_local())
         .def(py::init<int, int, std::string,  size_t , size_t,  bool ,std::map<std::string,std::string>>(),

@@ -94,6 +94,18 @@ struct NvEncInputFrame
     NV_ENC_INPUT_RESOURCE_TYPE resourceType;
 };
 
+struct NvEncOutputBitstream
+{
+    uint32_t frameIdx;
+    uint32_t hwEncodeStatus;
+    uint64_t outputTimeStamp;
+    uint64_t outputDuration;
+    uint32_t pictureType;
+    uint32_t frameAvgQP;
+    uint32_t frameIdxDisplay;
+    std::vector<std::uint8_t> bitstream;
+};
+
 /**
 * @brief Shared base class for different encoder interfaces.
 */
@@ -138,7 +150,7 @@ public:
     *  data, which has been copied to an input buffer obtained from the
     *  GetNextInputFrame() function.
     */
-    virtual void EncodeFrame(std::vector<std::pair<uint64_t, std::vector<uint8_t>>> &vPacket, NV_ENC_PIC_PARAMS *pPicParams = nullptr);
+    virtual void EncodeFrame(std::vector<NvEncOutputBitstream> &vPacket, NV_ENC_PIC_PARAMS *pPicParams = nullptr);
 
     /*
      *  @brief: todo
@@ -151,7 +163,7 @@ public:
     *  from the encoder. The application must call this function before destroying
     *  an encoder session.
     */
-    virtual void EndEncode(std::vector<std::pair<uint64_t, std::vector<uint8_t>>>  &vPacket);
+    virtual void EndEncode(std::vector<NvEncOutputBitstream>  &vPacket);
 
     /**
     *  @brief  This function is used to query hardware encoder capabilities.
@@ -388,7 +400,7 @@ private:
     *  This is called by DoEncode() function. If there is buffering enabled,
     *  this may return without any output data.
     */
-    void GetEncodedPacket(std::vector<NV_ENC_OUTPUT_PTR> &vOutputBuffer, std::vector<std::pair<uint64_t, std::vector<uint8_t>>> &vPacket, bool bOutputDelay);
+    void GetEncodedPacket(std::vector<NV_ENC_OUTPUT_PTR> &vOutputBuffer, std::vector<NvEncOutputBitstream> &vPacket, bool bOutputDelay);
 
     /**
     *  @brief This is a private function which is used to initialize the bitstream buffers.

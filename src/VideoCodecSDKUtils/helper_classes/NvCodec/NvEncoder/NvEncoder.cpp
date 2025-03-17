@@ -499,7 +499,7 @@ void NvEncoder::MapResources(uint32_t bfrIdx)
     }
 }
 
-void NvEncoder::EncodeFrame(std::vector<std::pair<uint64_t, std::vector<uint8_t>>> &vPacket, NV_ENC_PIC_PARAMS *pPicParams)
+void NvEncoder::EncodeFrame(std::vector<NvEncOutputBitstream> &vPacket, NV_ENC_PIC_PARAMS *pPicParams)
 {
     NVTX_SCOPED_RANGE("EncodeFrame")
     vPacket.clear();
@@ -614,13 +614,13 @@ void NvEncoder::RunMotionEstimation(std::vector<uint8_t> &mvData)
     if (nvStatus == NV_ENC_SUCCESS)
     {
         m_iToSend++;
-        std::vector<std::pair<uint64_t, std::vector<uint8_t>>> vPacket;
+        std::vector<NvEncOutputBitstream> vPacket;
         GetEncodedPacket(m_vMVDataOutputBuffer, vPacket, true);
         if (vPacket.size() != 1)
         {
             NVENC_THROW_ERROR("GetEncodedPacket() doesn't return one (and only one) MVData", NV_ENC_ERR_GENERIC);
         }
-        mvData = vPacket[0].second;
+        mvData = vPacket[0].bitstream;
     }
     else
     {
@@ -674,7 +674,7 @@ void NvEncoder::SendEOS()
 }
 
 
-void NvEncoder::EndEncode(std::vector<std::pair<uint64_t, std::vector<uint8_t>>> &vPacket)
+void NvEncoder::EndEncode(std::vector<NvEncOutputBitstream> &vPacket)
 {
     vPacket.clear();
     if (!IsHWEncoderInitialized())
@@ -687,7 +687,7 @@ void NvEncoder::EndEncode(std::vector<std::pair<uint64_t, std::vector<uint8_t>>>
     GetEncodedPacket(m_vBitstreamOutputBuffer, vPacket, false);
 }
 
-void NvEncoder::GetEncodedPacket(std::vector<NV_ENC_OUTPUT_PTR> &vOutputBuffer, std::vector<std::pair<uint64_t, std::vector<uint8_t>>> &vPacket, bool bOutputDelay)
+void NvEncoder::GetEncodedPacket(std::vector<NV_ENC_OUTPUT_PTR> &vOutputBuffer, std::vector<NvEncOutputBitstream> &vPacket, bool bOutputDelay)
 {
     unsigned i = 0;
     int iEnd = bOutputDelay ? m_iToSend - m_nOutputDelay : m_iToSend;
@@ -702,21 +702,29 @@ void NvEncoder::GetEncodedPacket(std::vector<NV_ENC_OUTPUT_PTR> &vOutputBuffer, 
         uint8_t *pData = (uint8_t *)lockBitstreamData.bitstreamBufferPtr;
         if (vPacket.size() < i + 1)
         {
-            vPacket.push_back(std::make_pair(lockBitstreamData.outputTimeStamp, std::vector<uint8_t>()));
+            vPacket.push_back(NvEncOutputBitstream{
+                lockBitstreamData.frameIdx,
+                lockBitstreamData.hwEncodeStatus,
+                lockBitstreamData.outputTimeStamp,
+                lockBitstreamData.outputDuration,
+                lockBitstreamData.pictureType,
+                lockBitstreamData.frameAvgQP,
+                lockBitstreamData.frameIdxDisplay,
+                std::vector<uint8_t>()});
         }
-        vPacket[i].second.clear();
+        vPacket[i].bitstream.clear();
 
         if ((m_initializeParams.encodeGUID == NV_ENC_CODEC_AV1_GUID) && (m_bUseIVFContainer))
         {
             if (m_bWriteIVFFileHeader)
             {
-                m_IVFUtils.WriteFileHeader(vPacket[i].second, MAKE_FOURCC('A', 'V', '0', '1'), m_initializeParams.encodeWidth, m_initializeParams.encodeHeight, m_initializeParams.frameRateNum, m_initializeParams.frameRateDen, 0xFFFF);
+                m_IVFUtils.WriteFileHeader(vPacket[i].bitstream, MAKE_FOURCC('A', 'V', '0', '1'), m_initializeParams.encodeWidth, m_initializeParams.encodeHeight, m_initializeParams.frameRateNum, m_initializeParams.frameRateDen, 0xFFFF);
                 m_bWriteIVFFileHeader = false;
             }
 
-            m_IVFUtils.WriteFrameHeader(vPacket[i].second, lockBitstreamData.bitstreamSizeInBytes, lockBitstreamData.outputTimeStamp);
+            m_IVFUtils.WriteFrameHeader(vPacket[i].bitstream, lockBitstreamData.bitstreamSizeInBytes, lockBitstreamData.outputTimeStamp);
         }
-        vPacket[i].second.insert(vPacket[i].second.end(), &pData[0], &pData[lockBitstreamData.bitstreamSizeInBytes]);
+        vPacket[i].bitstream.insert(vPacket[i].bitstream.end(), &pData[0], &pData[lockBitstreamData.bitstreamSizeInBytes]);
 
         i++;
 
@@ -816,7 +824,7 @@ void NvEncoder::FlushEncoder()
         // flush the encoder queue and then unmapped it if any surface is still mapped
         try
         {
-            std::vector<std::pair<uint64_t, std::vector<uint8_t>>> vPacket;
+            std::vector<NvEncOutputBitstream> vPacket;
             EndEncode(vPacket);
         }
         catch (...)

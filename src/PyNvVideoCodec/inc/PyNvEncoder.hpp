@@ -115,7 +115,7 @@ private:
 
     const NvEncInputFrame* GetEncoderInput(py::object _frame);
     const NvEncInputFrame* GetEncoderInputFromCPUBuffer(py::array_t<uint8_t, py::array::c_style | py::array::forcecast> _frame);
-    void ConvertFrameNumToTimestamp(std::vector<std::pair<uint64_t, std::vector<uint8_t>>> &vPacket);
+    void ConvertFrameNumToTimestamp(std::vector<NvEncOutputBitstream> &vPacket);
     std::unique_ptr<NvCUStream> pCUStream;
     structEncodeReconfigureParams m_EncReconfigureParams;
 protected:
@@ -128,8 +128,8 @@ public:
     PyNvEncoder(PyNvEncoder& pyenvc);
     NV_ENC_REGISTERED_PTR RegisterInputFrame(const py::object obj, const CAIMemoryView frame); 
     bool Reconfigure(structEncodeReconfigureParams reconfigureParams);
-    std::vector<std::pair<uint64_t, std::vector<uint8_t>>> Encode(const py::object frame, int64_t timestamp_ns = -1);
-    std::vector<std::pair<uint64_t, std::vector<uint8_t>>> Encode();
+    std::vector<NvEncOutputBitstream> Encode(const py::object frame, int64_t timestamp_ns = -1);
+    std::vector<NvEncOutputBitstream> Encode();
     void UnregisterInputFrame(const CAIMemoryView frame);
     void InitEncodeReconfigureParams(const NV_ENC_INITIALIZE_PARAMS params);
     structEncodeReconfigureParams GetEncodeReconfigureParams();
