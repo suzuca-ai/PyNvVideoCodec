@@ -1,6 +1,9 @@
 PyNvVideoCodec
 =============
 
+.. note::
+   This repository contains patches created by `SUZUCA.AI <https://suzuca.ai>`. For the original version, please refer to `this branch <https://github.com/suzuca-ai/PyNvVideoCodec/tree/original-1.0.2>`_.
+
 `PyNvVideoCodec <https://docs.nvidia.com/video-technologies/pynvvideocodec/index.html>`_ is NVIDIA's Python based video codec library for hardware accelerated video encode and decode on NVIDIA GPUs. PyNvVideoCodec is the successor of `VPF <https://github.com/NVIDIA/VideoProcessingFramework>`_ (Video Processing Framework).
 
 The library is distributed under MIT license and is officially supported by NVIDIA. PyNvVideoCodec library internally uses Video Codec SDK's core C/C++ video encode and decode APIs and provides easy to use Python APIs on it. The library offers encode and decode performance close to Video Codec SDK.
