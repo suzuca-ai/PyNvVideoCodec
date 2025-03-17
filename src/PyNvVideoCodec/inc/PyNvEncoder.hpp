@@ -23,9 +23,11 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
+#include <map>
+#include <optional>
+
 #include "NvEncoderCuda.h"
 #include "PyCAIMemoryView.hpp"
-#include <map>
 
 namespace py = pybind11;
 
@@ -128,7 +130,7 @@ public:
     PyNvEncoder(PyNvEncoder& pyenvc);
     NV_ENC_REGISTERED_PTR RegisterInputFrame(const py::object obj, const CAIMemoryView frame); 
     bool Reconfigure(structEncodeReconfigureParams reconfigureParams);
-    std::vector<NvEncOutputBitstream> Encode(const py::object frame, int64_t timestamp_ns = -1);
+    std::vector<NvEncOutputBitstream> Encode(const py::object frame, std::optional<int64_t> timestamp_ns = std::nullopt);
     std::vector<NvEncOutputBitstream> Encode();
     void UnregisterInputFrame(const CAIMemoryView frame);
     void InitEncodeReconfigureParams(const NV_ENC_INITIALIZE_PARAMS params);
@@ -136,4 +138,3 @@ public:
 
      ~PyNvEncoder();
 };
-

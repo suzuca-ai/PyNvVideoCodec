@@ -418,7 +418,7 @@ void PyNvEncoder::ConvertFrameNumToTimestamp(std::vector<NvEncOutputBitstream> &
     }
 }
 
-std::vector<NvEncOutputBitstream> PyNvEncoder::Encode(py::object _frame, int64_t timestamp_ns)
+std::vector<NvEncOutputBitstream> PyNvEncoder::Encode(py::object _frame, std::optional<int64_t> timestamp_ns)
 {
     py::object frame = _frame;
 
@@ -439,13 +439,15 @@ std::vector<NvEncOutputBitstream> PyNvEncoder::Encode(py::object _frame, int64_t
     NV_ENC_PIC_PARAMS picParam = { 0 };
     picParam.inputTimeStamp = m_frameNum++;
 
-    // If timestamp_ns is -1, use current time in nanoseconds
-    if (timestamp_ns == -1) {
+    int64_t actual_timestamp;
+    if (!timestamp_ns.has_value()) {
         auto now = std::chrono::system_clock::now();
         auto duration = now.time_since_epoch();
-        timestamp_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count();
+        actual_timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count();
+    } else {
+        actual_timestamp = timestamp_ns.value();
     }
-    m_mapFrameNumToTimestamp[picParam.inputTimeStamp] = timestamp_ns;
+    m_mapFrameNumToTimestamp[picParam.inputTimeStamp] = actual_timestamp;
 
     std::vector<NvEncOutputBitstream> vOutput;
     m_encoder->EncodeFrame(vOutput, &picParam);
@@ -620,7 +622,7 @@ void Init_PyNvEncoder(py::module& m)
             )pbdoc")
         .def(
              "Encode",
-             [](std::shared_ptr<PyNvEncoder>& self, const py::object frame, int64_t timestamp_ns = -1)
+             [](std::shared_ptr<PyNvEncoder>& self, const py::object frame, std::optional<int64_t> timestamp_ns = std::nullopt)
              {
                 return self->Encode(frame, timestamp_ns);
              }, R"pbdoc(
