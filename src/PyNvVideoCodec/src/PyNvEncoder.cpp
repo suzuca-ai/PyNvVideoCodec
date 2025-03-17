@@ -168,7 +168,7 @@ PyNvEncoder::PyNvEncoder(
     options.insert({"fmt", _format});
     options.insert({"s", std::to_string(_width) + "x" + std::to_string(_height)});
     NvEncoderClInterface cliInterface(options);
-    cliInterface.SetupInitParams(params, false, m_encoder->GetApi(), m_encoder->GetEncoder(), false);
+    cliInterface.SetupInitParams(params, false, m_encoder->GetApi(), m_encoder->GetEncoder(), options.find("print_settings") != options.end());
 
     m_encoder->CreateEncoder(&params);
     pCUStream.reset(new NvCUStream(cudacontext, cudastream, m_encoder));
