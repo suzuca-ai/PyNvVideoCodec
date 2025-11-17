@@ -1014,7 +1014,7 @@ static CAPS PyNvEncoderCaps(
             hModule = nullptr;
         }
     };
-    std::unique_ptr<void, decltype(cleanupCtxModule)> ctxModuleGuard{nullptr, cleanupCtxModule};
+    std::unique_ptr<void, decltype(cleanupCtxModule)> ctxModuleGuard{reinterpret_cast<void*>(1), cleanupCtxModule};
 
     NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS encodeSessionExParams = { NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS_VER };
     encodeSessionExParams.device = cudacontext;
@@ -1027,7 +1027,7 @@ static CAPS PyNvEncoderCaps(
             hEncoder = nullptr;
         }
     };
-    std::unique_ptr<void, decltype(cleanupEncoder)> encoderGuard{nullptr, cleanupEncoder};
+    std::unique_ptr<void, decltype(cleanupEncoder)> encoderGuard{reinterpret_cast<void*>(1), cleanupEncoder};
 
     GUID encodeGUID = (codec == "hevc") ? NV_ENC_CODEC_HEVC_GUID : (codec == "av1") ? NV_ENC_CODEC_AV1_GUID : NV_ENC_CODEC_H264_GUID;
     NV_ENC_CAPS_PARAM capsParam = { NV_ENC_CAPS_PARAM_VER };
