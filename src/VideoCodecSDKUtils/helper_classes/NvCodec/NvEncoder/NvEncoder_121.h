@@ -86,6 +86,12 @@ struct NvEncOutputFrame
     std::vector<uint8_t> frame;
     NV_ENC_PIC_TYPE pictureType;
     uint64_t timeStamp;
+
+    uint32_t frameIdx;
+    uint32_t hwEncodeStatus;
+    uint64_t outputDuration;
+    uint32_t frameAvgQP;
+    uint32_t frameIdxDisplay;
 };
 
 /**

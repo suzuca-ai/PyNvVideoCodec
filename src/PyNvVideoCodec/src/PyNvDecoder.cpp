@@ -214,7 +214,12 @@ static CAPS PyNvDecoderCaps(
     CUdevice cuDevice = 0;
     CUcontext cudacontext;
     cuDeviceGet(&cuDevice, iGPU);
+#if CUDA_VERSION >= 12000
+    CUctxCreateParams params{};
+    cuCtxCreate(&cudacontext, &params, 0, cuDevice);
+#else
     cuCtxCreate(&cudacontext, 0, cuDevice);
+#endif
     CUVIDDECODECAPS decodecaps;
     memset(&decodecaps, 0, sizeof(decodecaps));
     decodecaps.eCodecType      = codec;

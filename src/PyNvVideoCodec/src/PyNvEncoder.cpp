@@ -615,7 +615,7 @@ const NvEncInputFrame* PyNvEncoder::GetEncoderInput(py::object frame)
         );
     return encoderInputFrame;
 }
-void PyNvEncoder::SaveTimestamp(uint64_t frameNum, std::optional<int64_t> timestamp_ns = std::nullopt);
+void PyNvEncoder::SaveTimestamp(uint64_t frameNum, std::optional<int64_t> timestamp_ns)
 {
     int64_t actual_timestamp;
     if (!timestamp_ns.has_value()) {
@@ -632,16 +632,16 @@ void PyNvEncoder::ConvertFrameNumToTimestamp(std::vector<NvEncOutputFrame> &vPac
 {
     for(auto& packet : vPacket)
     {
-        auto found = m_mapFrameNumToTimestamp.find(packet.timestamp);
+        auto found = m_mapFrameNumToTimestamp.find(packet.timeStamp);
         if(found == m_mapFrameNumToTimestamp.end()) {
             throw std::runtime_error("[BUG] frame number not found in map");
         }
-        packet.timestamp = found->second;
+        packet.timeStamp = found->second;
         m_mapFrameNumToTimestamp.erase(found);
     }
 }
 
-std::vector<NvEncOutputFrame> PyNvEncoder::Encode(py::object _frame, std::optional<int64_t> timestamp_ns);
+std::vector<NvEncOutputFrame> PyNvEncoder::Encode(py::object _frame, std::optional<int64_t> timestamp_ns)
 {
     py::object frame = _frame;
 
@@ -672,7 +672,7 @@ std::vector<NvEncOutputFrame> PyNvEncoder::Encode(py::object _frame, std::option
 }
 
 // For Encode with pic flags and SEI
-std::vector<NvEncOutputFrame> PyNvEncoder::Encode(py::object _frame, uint8_t m_picFlags, SEI_MESSAGE sei, std::optional<int64_t> timestamp_ns);
+std::vector<NvEncOutputFrame> PyNvEncoder::Encode(py::object _frame, uint8_t m_picFlags, SEI_MESSAGE sei, std::optional<int64_t> timestamp_ns)
 {
     py::object frame = _frame;
 
@@ -747,10 +747,9 @@ std::vector<NvEncOutputFrame> PyNvEncoder::Encode(py::object _frame, uint8_t m_p
 
 
 // For Encode with pic flags
-std::vector<NvEncOutputFrame> PyNvEncoder::Encode(py::object _frame, uint8_t m_picFlags, std::optional<int64_t> timestamp_ns);
+std::vector<NvEncOutputFrame> PyNvEncoder::Encode(py::object _frame, uint8_t m_picFlags, std::optional<int64_t> timestamp_ns)
 {
     py::object frame = _frame;
-    std::vector<NvEncOutputFrame> vvByte;
 
     if(hasattr(frame, "cuda"))
     {
@@ -785,9 +784,7 @@ std::vector<NvEncOutputFrame> PyNvEncoder::Encode(py::object _frame, uint8_t m_p
 
 // For EndEncode
 std::vector<NvEncOutputFrame> PyNvEncoder::Encode()
-{
-    std::vector<NvEncOutputFrame> vvByte;
-    
+{    
     py::gil_scoped_release release;
 
     std::vector<NvEncOutputFrame> vvByte;
@@ -990,7 +987,12 @@ static CAPS PyNvEncoderCaps(
     CUcontext cudacontext;
     cuDeviceGet(&cuDevice, iGPU);
     ValidateGpuId(iGPU);
+#if CUDA_VERSION >= 12000
+    CUctxCreateParams params{};
+    cuCtxCreate(&cudacontext, &params, 0, cuDevice);
+#else
     cuCtxCreate(&cudacontext, 0, cuDevice);
+#endif
 
     NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS encodeSessionExParams = { NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS_VER };
     encodeSessionExParams.device = cudacontext;

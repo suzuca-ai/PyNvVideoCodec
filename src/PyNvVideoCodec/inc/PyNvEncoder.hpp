@@ -121,6 +121,7 @@ private:
 
     const NvEncInputFrame* GetEncoderInput(py::object _frame);
     const NvEncInputFrame* GetEncoderInputFromCPUBuffer(py::array_t<uint8_t, py::array::c_style | py::array::forcecast> _frame);
+    void SaveTimestamp(uint64_t frameNum, std::optional<int64_t> timestamp_ns = std::nullopt);
     void ConvertFrameNumToTimestamp(std::vector<NvEncOutputFrame> &vPacket);
     std::unique_ptr<NvCUStream> pCUStream;
     structEncodeReconfigureParams m_EncReconfigureParams;
