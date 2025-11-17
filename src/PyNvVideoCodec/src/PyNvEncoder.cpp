@@ -35,6 +35,7 @@
 #include <pybind11/embed.h>
 #include <pybind11/cast.h>
 #include <sstream>
+#include <memory>
 #include <unordered_map>
 
 using namespace std;
@@ -997,13 +998,36 @@ static CAPS PyNvEncoderCaps(
 #else
     cuCtxCreate(&cudacontext, 0, cuDevice);
 #endif
+    void* hEncoder = NULL;
+    // Make sure module/context are released even if nvEncOpenEncodeSessionEx throws.
+    auto cleanupCtxModule = [&](void*) {
+        if (cudacontext) {
+            cuCtxDestroy(cudacontext);
+            cudacontext = nullptr;
+        }
+        if (hModule) {
+#if defined(_WIN32)
+            FreeLibrary((HMODULE)hModule);
+#else
+            dlclose(hModule);
+#endif
+            hModule = nullptr;
+        }
+    };
+    std::unique_ptr<void, decltype(cleanupCtxModule)> ctxModuleGuard{nullptr, cleanupCtxModule};
 
     NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS encodeSessionExParams = { NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS_VER };
     encodeSessionExParams.device = cudacontext;
     encodeSessionExParams.deviceType = NV_ENC_DEVICE_TYPE_CUDA;
     encodeSessionExParams.apiVersion = NVENCAPI_VERSION;
-    void* hEncoder = NULL;
     NVENC_API_CALL(m_nvenc.nvEncOpenEncodeSessionEx(&encodeSessionExParams, &hEncoder));
+    auto cleanupEncoder = [&](void*) {
+        if (hEncoder) {
+            m_nvenc.nvEncDestroyEncoder(hEncoder);
+            hEncoder = nullptr;
+        }
+    };
+    std::unique_ptr<void, decltype(cleanupEncoder)> encoderGuard{nullptr, cleanupEncoder};
 
     GUID encodeGUID = (codec == "hevc") ? NV_ENC_CODEC_HEVC_GUID : (codec == "av1") ? NV_ENC_CODEC_AV1_GUID : NV_ENC_CODEC_H264_GUID;
     NV_ENC_CAPS_PARAM capsParam = { NV_ENC_CAPS_PARAM_VER };
@@ -1014,19 +1038,6 @@ static CAPS PyNvEncoderCaps(
         capsParam.capsToQuery = static_cast<NV_ENC_CAPS>(i);
         NVENC_API_CALL(m_nvenc.nvEncGetEncodeCaps(hEncoder, encodeGUID, &capsParam, &v));
         caps[getCapName(static_cast<NV_ENC_CAPS>(i))] = v;
-    }
-    m_nvenc.nvEncDestroyEncoder(hEncoder);
-
-    hEncoder = nullptr;
-    cuCtxDestroy(cudacontext);
-
-    if (hModule) {
-#if defined(_WIN32)
-        FreeLibrary((HMODULE)hModule);
-#else
-        dlclose(hModule);
-#endif
-        hModule = nullptr;
     }
 
     return caps;
