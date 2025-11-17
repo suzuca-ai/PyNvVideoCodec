@@ -626,6 +626,7 @@ void PyNvEncoder::SaveTimestamp(uint64_t frameNum, std::optional<int64_t> timest
         actual_timestamp = timestamp_ns.value();
     }
     m_mapFrameNumToTimestamp[frameNum] = actual_timestamp;
+    std::cout << "Saved timestamp " << actual_timestamp << " for frame number " << frameNum << std::endl;
 }
 
 void PyNvEncoder::ConvertFrameNumToTimestamp(std::vector<NvEncOutputFrame> &vPacket)
@@ -634,6 +635,10 @@ void PyNvEncoder::ConvertFrameNumToTimestamp(std::vector<NvEncOutputFrame> &vPac
     {
         auto found = m_mapFrameNumToTimestamp.find(packet.timeStamp);
         if(found == m_mapFrameNumToTimestamp.end()) {
+            std::cerr << "Frame number " << packet.timeStamp << " not found in timestamp map." << std::endl;
+            for (const auto& entry : m_mapFrameNumToTimestamp) {
+                std::cerr << "Map entry - Frame number: " << entry.first << ", Timestamp: " << entry.second << std::endl;
+            }
             throw std::runtime_error("[BUG] frame number not found in map");
         }
         packet.timeStamp = found->second;
