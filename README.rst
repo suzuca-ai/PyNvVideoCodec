@@ -1,6 +1,9 @@
 PyNvVideoCodec
 =============
 
+.. note::
+   This repository contains patches created by `SUZUCA.AI <https://suzuca.ai>`. For the original version, please refer to `this branch <https://github.com/suzuca-ai/PyNvVideoCodec/tree/original-1.0.2>`_.
+
 `PyNvVideoCodec <https://docs.nvidia.com/video-technologies/pynvvideocodec/index.html>`_ is NVIDIA's Python-based library that provides simple yet powerful Python APIs for hardware-accelerated video encoding and decoding on NVIDIA GPUs.
 
 PyNvVideoCodec is built on top of the Video Codec SDK and offers encode, decode, and transcode performance on par with it.

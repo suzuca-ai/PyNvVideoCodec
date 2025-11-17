@@ -26,6 +26,7 @@
 #include "NvEncoderCuda.h"
 #include "PyCAIMemoryView.hpp"
 #include <map>
+#include <optional>
 
 namespace py = pybind11;
 
@@ -112,6 +113,7 @@ private:
     size_t m_width;
     size_t m_height;
     uint64_t m_frameNum;
+    std::unordered_map<uint64_t, uint64_t> m_mapFrameNumToTimestamp;
     NV_ENC_BUFFER_FORMAT m_eBufferFormat;
     bool m_bUseCPUInutBuffer;
     GUID m_encodeGUID;
@@ -119,6 +121,7 @@ private:
 
     const NvEncInputFrame* GetEncoderInput(py::object _frame);
     const NvEncInputFrame* GetEncoderInputFromCPUBuffer(py::array_t<uint8_t, py::array::c_style | py::array::forcecast> _frame);
+    void ConvertFrameNumToTimestamp(std::vector<NvEncOutputFrame> &vPacket);
     std::unique_ptr<NvCUStream> pCUStream;
     structEncodeReconfigureParams m_EncReconfigureParams;
 protected:
@@ -131,10 +134,10 @@ public:
     PyNvEncoder(PyNvEncoder& pyenvc);
     NV_ENC_REGISTERED_PTR RegisterInputFrame(const py::object obj, const CAIMemoryView frame); 
     bool Reconfigure(structEncodeReconfigureParams reconfigureParams);
-    py::bytes Encode(py::object frame, uint8_t picFlags, SEI_MESSAGE sei);
-    py::bytes Encode(const py::object frame, uint8_t picFlags);
-    py::bytes Encode(py::object _frame);
-    py::bytes Encode();
+    std::vector<NvEncOutputFrame> Encode(py::object frame, uint8_t picFlags, SEI_MESSAGE sei, std::optional<int64_t> timestamp_ns = std::nullopt);
+    std::vector<NvEncOutputFrame> Encode(const py::object frame, uint8_t picFlags, std::optional<int64_t> timestamp_ns = std::nullopt);
+    std::vector<NvEncOutputFrame> Encode(py::object _frame, std::optional<int64_t> timestamp_ns = std::nullopt);
+    std::vector<NvEncOutputFrame> Encode();
     void UnregisterInputFrame(const CAIMemoryView frame);
     void InitEncodeReconfigureParams(const NV_ENC_INITIALIZE_PARAMS params);
     structEncodeReconfigureParams GetEncodeReconfigureParams();

@@ -34,6 +34,7 @@
 #include <pybind11/stl.h>
 #include <pybind11/embed.h>
 #include <pybind11/cast.h>
+#include <sstream>
 #include <unordered_map>
 
 using namespace std;
@@ -231,7 +232,7 @@ PyNvEncoder::PyNvEncoder(
         options.insert({"fmt", _format});
         options.insert({"s", std::to_string(_width) + "x" + std::to_string(_height)});
         NvEncoderClInterface cliInterface(options);
-        cliInterface.SetupInitParams(params, false, m_encoder->GetApi(), m_encoder->GetEncoder(), false);
+        cliInterface.SetupInitParams(params, false, m_encoder->GetApi(), m_encoder->GetEncoder(), options.find("print_settings") != options.end());
         m_encoder->CreateDefaultEncoderParams(&params, params.encodeGUID, params.presetGUID, params.tuningInfo);
         m_encoder->CreateEncoder(&params);
 
@@ -614,11 +615,35 @@ const NvEncInputFrame* PyNvEncoder::GetEncoderInput(py::object frame)
         );
     return encoderInputFrame;
 }
+void PyNvEncoder::SaveTimestamp(uint64_t frameNum, std::optional<int64_t> timestamp_ns = std::nullopt);
+{
+    int64_t actual_timestamp;
+    if (!timestamp_ns.has_value()) {
+        auto now = std::chrono::system_clock::now();
+        auto duration = now.time_since_epoch();
+        actual_timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count();
+    } else {
+        actual_timestamp = timestamp_ns.value();
+    }
+    m_mapFrameNumToTimestamp[frameNum] = actual_timestamp;
+}
 
-py::bytes PyNvEncoder::Encode(py::object _frame)
+void PyNvEncoder::ConvertFrameNumToTimestamp(std::vector<NvEncOutputFrame> &vPacket)
+{
+    for(auto& packet : vPacket)
+    {
+        auto found = m_mapFrameNumToTimestamp.find(packet.timestamp);
+        if(found == m_mapFrameNumToTimestamp.end()) {
+            throw std::runtime_error("[BUG] frame number not found in map");
+        }
+        packet.timestamp = found->second;
+        m_mapFrameNumToTimestamp.erase(found);
+    }
+}
+
+std::vector<NvEncOutputFrame> PyNvEncoder::Encode(py::object _frame, std::optional<int64_t> timestamp_ns);
 {
     py::object frame = _frame;
-    std::vector<NvEncOutputFrame> vvByte;
 
     if(hasattr(frame, "cuda"))
     {
@@ -637,36 +662,19 @@ py::bytes PyNvEncoder::Encode(py::object _frame)
     NV_ENC_PIC_PARAMS picParam = { 0 };
     picParam.inputTimeStamp = m_frameNum++;
     
+    SaveTimestamp(picParam.inputTimeStamp, timestamp_ns);
+    std::vector<NvEncOutputFrame> vvByte;
     m_encoder->EncodeFrame(vvByte, &picParam);
-
-    size_t totalSize = 0;
-
-    for (const auto& vByte : vvByte) {
-        totalSize += vByte.frame.size();
-    }
-
-    // Allocate a single buffer
-
-    std::unique_ptr<char[]> buffer(new char[totalSize]);
-    size_t offset = 0;
-
-    for (const auto& vByte : vvByte) {
-        if (vByte.frame.size() > 0) {
-            std::memcpy(buffer.get() + offset, vByte.frame.data(), vByte.frame.size());
-            offset += vByte.frame.size();
-        }
-    }
+    ConvertFrameNumToTimestamp(vvByte);
 
     py::gil_scoped_acquire acquire;
-    return py::bytes(buffer.get(), totalSize);
-
+    return vvByte;
 }
 
 // For Encode with pic flags and SEI
-py::bytes PyNvEncoder::Encode(py::object _frame, uint8_t m_picFlags, SEI_MESSAGE sei)
+std::vector<NvEncOutputFrame> PyNvEncoder::Encode(py::object _frame, uint8_t m_picFlags, SEI_MESSAGE sei, std::optional<int64_t> timestamp_ns);
 {
     py::object frame = _frame;
-    std::vector<NvEncOutputFrame> vvByte;
 
     if(hasattr(frame, "cuda"))
     {
@@ -725,34 +733,21 @@ py::bytes PyNvEncoder::Encode(py::object _frame, uint8_t m_picFlags, SEI_MESSAGE
     }
     picParam.encodePicFlags |= m_picFlags;
 
+    SaveTimestamp(picParam.inputTimeStamp, timestamp_ns);
+    std::vector<NvEncOutputFrame> vvByte;
     m_encoder->EncodeFrame(vvByte, &picParam);
-
-    // Calculate total size
-    size_t totalSize = 0;
-    for (const auto& vByte : vvByte) {
-        totalSize += vByte.frame.size();
-    }
-
-    // Allocate a single buffer
-    std::unique_ptr<char[]> buffer(new char[totalSize]);
-    size_t offset = 0;
-    for (const auto& vByte : vvByte) {
-        if (vByte.frame.size() > 0) {
-            std::memcpy(buffer.get() + offset, vByte.frame.data(), vByte.frame.size());
-            offset += vByte.frame.size();
-        }
-    }
+    ConvertFrameNumToTimestamp(vvByte);
 
     if (pSei)
         delete[] pSei;
 
     py::gil_scoped_acquire acquire;
-    return py::bytes(buffer.get(), totalSize);
+    return vvByte;
 }
 
 
 // For Encode with pic flags
-py::bytes PyNvEncoder::Encode(py::object _frame, uint8_t m_picFlags) 
+std::vector<NvEncOutputFrame> PyNvEncoder::Encode(py::object _frame, uint8_t m_picFlags, std::optional<int64_t> timestamp_ns);
 {
     py::object frame = _frame;
     std::vector<NvEncOutputFrame> vvByte;
@@ -777,56 +772,30 @@ py::bytes PyNvEncoder::Encode(py::object _frame, uint8_t m_picFlags)
     picParam.inputTimeStamp = m_frameNum++;
     picParam.encodePicFlags |= m_picFlags;
 
+
+    SaveTimestamp(picParam.inputTimeStamp, timestamp_ns);
+    std::vector<NvEncOutputFrame> vvByte;
     m_encoder->EncodeFrame(vvByte, &picParam);
-
-    // Calculate total size
-    size_t totalSize = 0;
-    for (const auto& vByte : vvByte) {
-        totalSize += vByte.frame.size();
-    }
-
-    // Allocate a single buffer
-    std::unique_ptr<char[]> buffer(new char[totalSize]);
-    size_t offset = 0;
-    for (const auto& vByte : vvByte) {
-        if (vByte.frame.size() > 0) {
-            std::memcpy(buffer.get() + offset, vByte.frame.data(), vByte.frame.size());
-            offset += vByte.frame.size();
-        }
-    }
+    ConvertFrameNumToTimestamp(vvByte);
 
     py::gil_scoped_acquire acquire;
-    return py::bytes(buffer.get(), totalSize);
+    return vvByte;
 }
 
 
 // For EndEncode
-py::bytes PyNvEncoder::Encode()
+std::vector<NvEncOutputFrame> PyNvEncoder::Encode()
 {
     std::vector<NvEncOutputFrame> vvByte;
     
     py::gil_scoped_release release;
-    
+
+    std::vector<NvEncOutputFrame> vvByte;
     m_encoder->EndEncode(vvByte);
-
-    // Calculate total size
-    size_t totalSize = 0;
-    for (const auto& vByte : vvByte) {
-        totalSize += vByte.frame.size();
-    }
-
-    // Allocate a single buffer
-    std::unique_ptr<char[]> buffer(new char[totalSize]);
-    size_t offset = 0;
-    for (const auto& vByte : vvByte) {
-        if (vByte.frame.size() > 0) {
-            std::memcpy(buffer.get() + offset, vByte.frame.data(), vByte.frame.size());
-            offset += vByte.frame.size();
-        }
-    }
+    ConvertFrameNumToTimestamp(vvByte);
 
     py::gil_scoped_acquire acquire;
-    return py::bytes(buffer.get(), totalSize);
+    return vvByte;
 }
 
 
@@ -1110,6 +1079,46 @@ void Init_PyNvEncoder(py::module& m)
             })
         ;
 
+    py::class_<NvEncOutputFrame>(m, "NvEncOutputFrame")
+        .def(py::init<>())
+        .def_readwrite("frame", &NvEncOutputFrame::frame)
+        .def_readwrite("pictureType", &NvEncOutputFrame::pictureType)
+        .def_readwrite("timeStamp", &NvEncOutputFrame::timeStamp)
+        .def_readwrite("frameIdx", &NvEncOutputFrame::frameIdx)
+        .def_readwrite("hwEncodeStatus", &NvEncOutputFrame::hwEncodeStatus)
+        .def_readwrite("outputDuration", &NvEncOutputFrame::outputDuration)
+        .def_readwrite("frameAvgQP", &NvEncOutputFrame::frameAvgQP)
+        .def_readwrite("frameIdxDisplay", &NvEncOutputFrame::frameIdxDisplay)
+        .def("__str__",
+            [](const NvEncOutputFrame& self)
+            {
+                std::stringstream ss;
+                ss << "NvEncOutputFrame {\n";
+                ss << "  frameIdx: " << self.frameIdx << "\n";
+                ss << "  frameIdxDisplay: " << self.frameIdxDisplay << "\n";
+                ss << "  hwEncodeStatus: " << self.hwEncodeStatus << "\n";
+                ss << "  timeStamp: " << self.timeStamp << "\n";
+                ss << "  outputDuration: " << self.outputDuration << "\n";
+                ss << "  pictureType: ";
+                switch (self.pictureType) {
+                    case NV_ENC_PIC_TYPE_P: ss << "P (Forward predicted)"; break;
+                    case NV_ENC_PIC_TYPE_B: ss << "B (Bi-directionally predicted)"; break;
+                    case NV_ENC_PIC_TYPE_I: ss << "I (Intra predicted)"; break;
+                    case NV_ENC_PIC_TYPE_IDR: ss << "IDR (IDR picture)"; break;
+                    case NV_ENC_PIC_TYPE_BI: ss << "BI (Bi-directional with Intra MBs)"; break;
+                    case NV_ENC_PIC_TYPE_SKIPPED: ss << "SKIPPED"; break;
+                    case NV_ENC_PIC_TYPE_INTRA_REFRESH: ss << "INTRA_REFRESH"; break;
+                    case NV_ENC_PIC_TYPE_NONREF_P: ss << "NONREF_P"; break;
+                    case NV_ENC_PIC_TYPE_UNKNOWN: ss << "UNKNOWN"; break;
+                    default: ss << "UNDEFINED(" << static_cast<int>(self.pictureType) << ")";
+                }
+                ss << "\n";
+                ss << "  frameAvgQP: " << static_cast<int>(self.frameAvgQP) << "\n";
+                ss << "  frame size: " << self.frame.size() << " bytes\n";
+                ss << "}";
+                return ss.str();
+            });
+
     py::class_<PyNvEncoder, shared_ptr<PyNvEncoder>>(m, "PyNvEncoder", py::module_local())
         .def(py::init<int, int, std::string,  size_t , size_t,  bool ,std::map<std::string,std::string>>(),
             R"pbdoc(
@@ -1117,33 +1126,48 @@ void Init_PyNvEncoder(py::module& m)
                 :param width, height, format, cpuinputbuffer,other-optional-params,  
             )pbdoc")
         .def(
-             "Encode",
-             [](std::shared_ptr<PyNvEncoder>& self, const py::object& frame)
-             {
-                return self->Encode(frame);
-             }, R"pbdoc(
-                 Encode frame. Returns encoded bitstream in CPU memory
-                 :param NVCV Image  object or any object that implements__cuda_array_interface 
-             )pbdoc")
+         "Encode",
+         [](std::shared_ptr<PyNvEncoder>& self, const py::object& frame, std::optional<int64_t> timestamp_ns)
+         {
+            return self->Encode(frame, timestamp_ns);
+         },
+         py::arg("frame"),
+         py::arg("timestamp_ns") = std::nullopt,
+         R"pbdoc(
+             Encode frame. Returns encoded bitstream in CPU memory
+             :param NVCV Image  object or any object that implements__cuda_array_interface 
+             :param timestamp_ns Optional timestamp in nanoseconds; defaults to current time if None
+         )pbdoc")
         .def(
             "Encode",
-            [](std::shared_ptr<PyNvEncoder>& self, const py::object& frame, uint8_t m_picFlags)
+            [](std::shared_ptr<PyNvEncoder>& self, const py::object& frame, uint8_t m_picFlags, std::optional<int64_t> timestamp_ns)
             {
-                return self->Encode(frame, m_picFlags);
-            }, R"pbdoc(
+                return self->Encode(frame, m_picFlags, timestamp_ns);
+            },
+            py::arg("frame"),
+            py::arg("m_picFlags"),
+            py::arg("timestamp_ns") = std::nullopt,
+            R"pbdoc(
                  Encode frame. Returns encoded bitstream in CPU memory
                  :param NVCV Image  object or any object that implements__cuda_array_interface 
                  :param m_picFlags  NV_ENC_PIC_FLAGS flag, to pass multiple flags at once, pass them using logical OR.
+                 :param timestamp_ns Optional timestamp in nanoseconds; defaults to current time if None
              )pbdoc")
         .def(
             "Encode",
-            [](std::shared_ptr<PyNvEncoder>& self, const py::object& frame, uint8_t m_picFlags, SEI_MESSAGE sei)
+            [](std::shared_ptr<PyNvEncoder>& self, const py::object& frame, uint8_t m_picFlags, SEI_MESSAGE sei, std::optional<int64_t> timestamp_ns)
             {
-                return self->Encode(frame, m_picFlags, sei);
-            }, R"pbdoc(
+                return self->Encode(frame, m_picFlags, sei, timestamp_ns);
+            },
+            py::arg("frame"),
+            py::arg("m_picFlags"),
+            py::arg("sei"),
+            py::arg("timestamp_ns") = std::nullopt,
+            R"pbdoc(
                  Encode frame. Returns encoded bitstream in CPU memory
                  :param NVCV Image  object or any object that implements__cuda_array_interface 
                  :param m_picFlags  NV_ENC_PIC_FLAGS flag, to pass multiple flags at once, pass them using logical OR.
+                 :param timestamp_ns Optional timestamp in nanoseconds; defaults to current time if None
              )pbdoc")
         .def(
              "EndEncode",
