@@ -28,15 +28,15 @@ cmake_minimum_required(VERSION 3.20)
 
 # This must be set before enabling CUDA. Otherwise it will be set to the default ARCH by nvcc (e.g. 52 by nvcc 11.7)
 if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-    # Define Volta / Turing / Ampere / Ada if not set by the user
+    # Define Turing / Ampere / Ada / Blackwell if not set by the user
     set(CMAKE_CUDA_ARCHITECTURES
-        60
-        70
-        72
         75
         80
         86
-        #89 # Require CUDA 11.8 for CC 89 or cmake 3.23 for CMAKE_CUDA_ARCHITECTURES_{ALL,ALL_MAJOR}
+        87
+        89
+        90
+        120
     )
 endif()
 
@@ -86,7 +86,6 @@ include(GenerateExportHeader)
 
 set(CUDA_HOST_COMPILER ${CMAKE_CXX_COMPILER})
 
-set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS};-gencode arch=compute_50,code=\"sm_50,compute_50\")
 # CUDA 11.7 and later is compiled with /MT option (staticaly linked with C runtime), 
 # since we are statically linking cudart_static.lib with the app, 
 # we need to make sure that all .obj files linked are compiled with /MT to avoid linker warning LNK4098
