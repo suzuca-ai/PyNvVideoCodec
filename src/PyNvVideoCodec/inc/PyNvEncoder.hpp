@@ -112,7 +112,7 @@ private:
     std::map<CUdeviceptr, NV_ENC_REGISTERED_PTR> m_mapPtr;
     size_t m_width;
     size_t m_height;
-    uint64_t m_frameNum;
+    uint64_t m_frameNum = 0;
     std::unordered_map<uint64_t, uint64_t> m_mapFrameNumToTimestamp;
     NV_ENC_BUFFER_FORMAT m_eBufferFormat;
     bool m_bUseCPUInutBuffer;
