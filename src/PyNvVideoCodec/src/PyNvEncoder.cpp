@@ -626,7 +626,6 @@ void PyNvEncoder::SaveTimestamp(uint64_t frameNum, std::optional<int64_t> timest
         actual_timestamp = timestamp_ns.value();
     }
     m_mapFrameNumToTimestamp[frameNum] = actual_timestamp;
-    std::cout << "Saved timestamp " << actual_timestamp << " for frame number " << frameNum << std::endl;
 }
 
 void PyNvEncoder::ConvertFrameNumToTimestamp(std::vector<NvEncOutputFrame> &vPacket)
