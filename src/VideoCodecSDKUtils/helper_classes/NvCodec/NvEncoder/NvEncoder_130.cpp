@@ -774,6 +774,12 @@ void NvEncoder::GetEncodedPacket(std::vector<NV_ENC_OUTPUT_PTR> &vOutputBuffer, 
         vPacket[i].frame.insert(vPacket[i].frame.end(), &pData[0], &pData[lockBitstreamData.bitstreamSizeInBytes]);
         vPacket[i].pictureType = lockBitstreamData.pictureType;
         vPacket[i].timeStamp = lockBitstreamData.outputTimeStamp;
+
+        vPacket[i].frameIdx = lockBitstreamData.frameIdx;
+        vPacket[i].hwEncodeStatus = lockBitstreamData.hwEncodeStatus;
+        vPacket[i].outputDuration = lockBitstreamData.outputDuration;
+        vPacket[i].frameAvgQP = lockBitstreamData.frameAvgQP;
+        vPacket[i].frameIdxDisplay = lockBitstreamData.frameIdxDisplay;
         i++;
 
         NVENC_API_CALL(m_nvenc.nvEncUnlockBitstream(m_hEncoder, lockBitstreamData.outputBitstream));
