@@ -1,7 +1,7 @@
 /*
  * This copyright notice applies to this file only
  *
- * SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -40,9 +40,10 @@
 
 class PyNvDecoder {
 private:
-    bool m_bDestroyContext;
+    bool mReleasePrimaryContext = false;
     CUcontext cuContext = NULL;
     CUstream cuStream = NULL;
+    int mGPUId = 0;
 
 protected:
     std::unique_ptr<NvDecoder> decoder;
@@ -55,16 +56,26 @@ public:
         size_t _context,
         size_t _stream,
         bool m_bUseDeviceFrame,
-        bool _enableasyncallocations
+        bool _enableasyncallocations,
+        int maxWidth = 0,
+        int maxHeight = 0,
+        OutputColorType outputColorType = OutputColorType::NATIVE,
+        bool _enableSEIMessage = false,
+        bool bWaitForSessionWarmUp = false,
+        DisplayDecodeLatency latency = DisplayDecodeLatency::DISPLAYDECODELATENCY_NATIVE
         );
 
     ~PyNvDecoder();
 
-    Pixel_Format GetNativeFormat(const cudaVideoSurfaceFormat inputFormat);
     std::vector<DecodedFrame> Decode(const PacketData pktdata);
     int GetNumDecodedFrame(const PacketData pktdata);
     uint8_t* GetLockedFrame(int64_t* pTimestamp);
     void UnlockFrame(uint8_t* pFrame);
+
+    /**
+   *  @brief  This function returns single decode frame.
+   */
+    DecodedFrame GetFrame();
 
     /**
    *  @brief  This function is used to wait on the event in current stream.
@@ -80,9 +91,7 @@ public:
     *  @brief  This function is used to get the output frame width.
     *  NV12/P016 output format width is 2 byte aligned because of U and V interleave
     */
-    int GetWidth() {
-        return decoder->GetWidth();
-    }
+    int GetWidth() { return decoder->GetWidth(); }
 
     /**
     *  @brief  This function is used to get the actual decode width
@@ -107,7 +116,7 @@ public:
     /**
     *   @brief  This function is used to get the current frame size based on pixel format.
     */
-    int GetFrameSize() { return decoder->GetFrameSize(); }
+    int GetFrameSize() { return decoder->GetOutputFrameSize(); }
 
     /**
     *   @brief  This function is used to get the current frame Luma plane size.
@@ -139,7 +148,19 @@ public:
     */
     cudaVideoSurfaceFormat GetOutputFormat() { return decoder->GetOutputFormat(); }
 
+    /**
+    *   @brief  This function allows app to set decoder reconfig params
+    *   @param  pResizeDim - width and height of resized output
+    */
+    int setReconfigParams(const Dim& mResizeDim) { return decoder->setReconfigParams(mResizeDim); };
+
     void setDecoderSessionID(int sessionID) { decoder->setDecoderSessionID(sessionID); }
     
     static int64_t getDecoderSessionOverHead(int sessionID) { return NvDecoder::getDecoderSessionOverHead(sessionID); }
+
+    void setSeekPTS(uint64_t pts) { decoder->setSeekPTS(pts); }
+
+    int64_t GetSessionInitTime() { return decoder->GetSessionInitTime(); }
+
+    static void SetSessionCount(uint32_t count) { NvDecoder::SetSessionCount(count); }
 };

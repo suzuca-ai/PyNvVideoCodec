@@ -1,7 +1,7 @@
 /*
  * This copyright notice applies to this file only
  *
- * SPDX-FileCopyrightText: Copyright (c) 2010-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2010-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -87,6 +87,9 @@ typedef enum cudaVideoSurfaceFormat_enum {
                                                  Can be used for 10 bit(6LSB bits 0), 12 bit (4LSB bits 0)      */
     cudaVideoSurfaceFormat_YUV444=2,        /**< Planar YUV [Y plane followed by U and V planes]                */
     cudaVideoSurfaceFormat_YUV444_16Bit=3,  /**< 16 bit Planar YUV [Y plane followed by U and V planes]. 
+                                                 Can be used for 10 bit(6LSB bits 0), 12 bit (4LSB bits 0)      */
+    cudaVideoSurfaceFormat_NV16 = 4,          /**< Semi-Planar YUV 422 [Y plane followed by interleaved UV plane] */
+    cudaVideoSurfaceFormat_P216 = 5           /**< 16 bit Semi-Planar YUV 422[Y plane followed by interleaved UV plane].
                                                  Can be used for 10 bit(6LSB bits 0), 12 bit (4LSB bits 0)      */
 } cudaVideoSurfaceFormat;
 

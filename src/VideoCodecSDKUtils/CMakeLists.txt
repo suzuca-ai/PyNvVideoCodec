@@ -1,6 +1,6 @@
 # This copyright notice applies to this file only
 #
-# SPDX-FileCopyrightText: Copyright (c) 2010-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2010-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: MIT
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
@@ -46,13 +46,16 @@ set(USE_NVTX $ENV{USE_NVTX})
 
 set(CODEC_SOURCES
  helper_classes/NvCodec/NvDecoder/NvDecoder.cpp
- helper_classes/NvCodec/NvEncoder/NvEncoder.cpp
+ helper_classes/NvCodec/NvEncoder/NvEncoder_130.cpp
+ helper_classes/NvCodec/NvEncoder/NvEncoder_121.cpp
 )
 set(CODEC_HDRS
  helper_classes/NvCodec/NvDecoder/NvDecoder.h
- helper_classes/NvCodec/NvEncoder/NvEncoder.h
+ helper_classes/NvCodec/NvEncoder/NvEncoder_130.h
+ helper_classes/NvCodec/NvEncoder/NvEncoder_121.h
  helper_classes/Utils/NvCodecUtils.h
  helper_classes/Utils/FFmpegDemuxer.h
+ helper_classes/Utils/FFmpegMuxer.h
  helper_classes/Utils/ColorSpace.h
  helper_classes/Utils/FFmpegStreamer.h
  helper_classes/Utils/Logger.h
@@ -65,7 +68,9 @@ set(CODEC_HDRS
  helper_classes/Utils/
  Interface/cuviddec.h
  Interface/nvcuvid.h
- Interface/nvEncodeAPI.h
+ Interface/nvEncodeAPI_130.h
+ Interface/nvEncodeAPI_121.h
+ Interface/configNvEncVer.h
 )
 
 set(CODEC_CUDA_UTILS
@@ -102,6 +107,16 @@ if (WIN32 AND CUDA_VERSION_MAJOR GREATER_EQUAL 11 AND CUDA_VERSION_MINOR GREATER
     target_compile_options(${PROJECT_NAME} PRIVATE "/MT")
 endif()
 
+if(WIN32)
+	if(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86_64")
+		add_compile_options("-fstack-protector-strong")
+		add_compile_options("-Wall")
+		add_compile_options("-Wformat -Wformat=2 -Wconversion -Wimplicit-fallthrough")
+		add_compile_options("--fPIC")
+	endif()
+endif()
+
+
 add_library(
     VideoCodecSDKUtils
     ${CODEC_SOURCES}
@@ -119,6 +134,7 @@ target_link_libraries(
     VideoCodecSDKUtils
     PUBLIC
         CUDA::cuda_driver
+		CUDA::cudart
 )
 
 
@@ -143,22 +159,12 @@ target_include_directories(
         ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-if(NOT EXISTS ${VIDEO_CODEC_INTERFACE_DIR}/nvEncodeAPI.h)
-    message(
-        FATAL_ERROR
-        "Could not find nvEncodeAPI.h! "
-        "Please set VIDEO_CODEC_INTERFACE_DIR=\"${VIDEO_CODEC_INTERFACE_DIR}\" to a location that contains nvEncodeAPI.h!"
-    )
-endif()
 
 if(UNIX)
     target_link_libraries(VideoCodecSDKUtils PUBLIC pthread)
 endif(UNIX)
 
 include(../cmake/ffmpeg.cmake)
-if(NV_FFMPEG_HAS_BSF)
-    target_compile_definitions(VideoCodecSDKUtils PUBLIC -DHAS_BSF=1)
-endif()
 target_include_directories(VideoCodecSDKUtils PUBLIC ${NV_FFMPEG_INCLUDE_DIR})
 target_link_libraries(VideoCodecSDKUtils PUBLIC ${NV_FFMPEG_LIBRARIES})
 
@@ -183,3 +189,52 @@ if(USE_NVTX)
 endif()
 
 message(STATUS "HAS_BSF=${HAS_BSF}")
+
+# Create separate targets for each NVENC version
+function(create_codec_utils_target VERSION_SUFFIX VERSION_DEFINE)
+    set(TARGET_NAME "VideoCodecSDKUtils${VERSION_SUFFIX}")
+    
+    add_library(${TARGET_NAME}
+        ${CODEC_SOURCES}
+        ${CODEC_HDRS}
+        ${NV_FFMPEG_HDRS}
+        ${CODEC_CUDA_UTILS}
+    )
+
+    target_compile_definitions(${TARGET_NAME} PRIVATE ${VERSION_DEFINE})
+    
+    target_link_libraries(${TARGET_NAME}
+        PUBLIC
+            CUDA::cuda_driver
+            CUDA::cudart
+    )
+
+    if(UNIX)
+        target_link_libraries(${TARGET_NAME} PUBLIC pthread)
+    endif()
+
+    target_include_directories(${TARGET_NAME}
+        PUBLIC
+            helper_classes/NvCodec
+            helper_classes/Utils
+            ${VIDEO_CODEC_INTERFACE_DIR}
+            ${CMAKE_CURRENT_BINARY_DIR}
+            ${NV_FFMPEG_INCLUDE_DIR}
+    )
+
+    target_link_libraries(${TARGET_NAME} PUBLIC ${NV_FFMPEG_LIBRARIES})
+
+    if(USE_NVTX)
+        target_link_libraries(${TARGET_NAME} PRIVATE nvtx3-cpp)
+        target_compile_definitions(${TARGET_NAME} PRIVATE -DUSE_NVTX=1)
+    endif()
+
+    set_property(TARGET ${TARGET_NAME}
+        PROPERTY
+            POSITION_INDEPENDENT_CODE ON
+    )
+endfunction()
+
+# Create both versions
+create_codec_utils_target("_121" "NVENC_VER_12_1")
+create_codec_utils_target("_130" "NVENC_VER_13_0")

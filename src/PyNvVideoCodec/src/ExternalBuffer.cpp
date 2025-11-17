@@ -1,7 +1,7 @@
 /*
  * This copyright notice applies to this file only
  *
- * SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -24,36 +24,15 @@
  */
 
 #include "ExternalBuffer.hpp"
+#include "NvCodecUtils.h"
 
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
 
+#include <string>
 #include <functional> // for std::multiplies
 
 using namespace py::literals;
-
-static void CheckValidCUDABuffer(const void *ptr)
-{
-    if (ptr == nullptr)
-    {
-        throw std::runtime_error("NULL CUDA buffer not accepted");
-    }
-
-    //TBD
-    //cudaPointerAttributes attrs = {};
-    //cudaError_t           err   = cudaPointerGetAttributes(&attrs, ptr);
-    //cudaGetLastError(); // reset the cuda error (if any)
-    //if (err != cudaSuccess || attrs.type == cudaMemoryTypeUnregistered)
-    //{
-    //    throw std::runtime_error("Buffer is not CUDA-accessible");
-    //}
-}
-
-//static std::string ToFormatString(const DLDataType &dtype)
-//{
-//    py::dtype dt = ToDType(ToNVCVDataType(dtype));
-//    return dt.attr("str").cast<std::string>();
-//}
 
 ExternalBuffer::ExternalBuffer(DLPackTensor &&dlTensor)
 {
@@ -105,13 +84,57 @@ void *ExternalBuffer::data() const
     return m_dlTensor->data;
 }
 
-py::capsule ExternalBuffer::dlpack(py::object stream) const
+py::capsule ExternalBuffer::dlpack(py::object consumer_stream, CUstream producer_stream, CUevent producer_stream_event) const
 {
     struct ManagerCtx
     {
         DLManagedTensor tensor;
         std::shared_ptr<const ExternalBuffer> extBuffer;
     };
+
+    if (m_dlTensor->device.device_type == kDLCUDA)
+    {
+        CUstream consumer_custream = nullptr;
+        // Caveat: DLPack semantics use int for stream objects. For CUDA's case it is
+        // a int64_t value. Need to check how this impacts.
+        auto consumer_raw_stream = consumer_stream.cast<int64_t>();
+        // 0 implies throw
+        // 1 implies legacy default
+        // 2 implies PTDS
+        // -1 implies no sync
+        // reference for semantics:
+        // https://data-apis.org/array-api/2022.12/API_specification/generated/array_api.array.__dlpack__.html
+        if (consumer_raw_stream == 0)
+        {
+            std::string msg = "Invalid value for stream parameter. Passed value of 0 which is not allowed\n";
+            PYNVVC_THROW_ERROR(msg, CUDA_ERROR_NOT_SUPPORTED);
+        }
+        else if (consumer_raw_stream == 1)
+        {
+            consumer_custream = CU_STREAM_LEGACY;
+        }
+        else if (consumer_raw_stream == 2)
+        {
+            consumer_custream = CU_STREAM_PER_THREAD;
+        }
+        
+        if (consumer_raw_stream != -1)
+        {
+            consumer_custream = reinterpret_cast<CUstream>(consumer_raw_stream);
+            if (producer_stream != consumer_custream)
+            {
+                // Note that producer event is recorded in decoder on a per frame
+                // basis and the event is stored in DecodedFrame structure returned
+                // to user. The caller of this functions fetches stream from 
+                // DecodedFrame and passes to this function.
+                ck(cuStreamWaitEvent(consumer_custream, producer_stream_event, 0));
+            }    
+        }
+    }
+    else if (m_dlTensor->device.device_type != kDLCPU)
+    {
+        LOG(WARNING) << "Unsupported Device Type. Should not reach here\n";
+    }
 
     auto ctx = std::make_unique<ManagerCtx>();
 
@@ -165,45 +188,48 @@ const DLTensor &ExternalBuffer::dlTensor() const
     return *m_dlTensor;
 }
 
-void ExternalBuffer::Export(py::module &m)
-{
-    py::class_<ExternalBuffer, std::shared_ptr<ExternalBuffer>>(m, "ExternalBuffer", py::dynamic_attr())
-        .def_property_readonly("shape", &ExternalBuffer::shape, "Get the shape of the buffer as an array")
-        .def_property_readonly("strides", &ExternalBuffer::strides, "Get the strides of the buffer")
-        .def_property_readonly("dtype", &ExternalBuffer::dtype, "Get the data type of the buffer")
-        .def("__dlpack__", &ExternalBuffer::dlpack, "stream"_a=1, "Export the buffer as a DLPack tensor")
-        .def("__dlpack_device__", &ExternalBuffer::dlpackDevice, "Get the device associated with the buffer");
-}
-
-int ExternalBuffer::LoadDLPack( std::vector<size_t> _shape, std::vector<size_t> _stride, std::string _typeStr, size_t _streamid, CUdeviceptr _data, bool _readOnly)
+int ExternalBuffer::LoadDLPack(std::vector<size_t> _shape, std::vector<size_t> _stride, std::string _typeStr,
+                               CUdeviceptr _data, bool useDeviceMemory, uint32_t deviceId, const CUcontext context)
 {
     m_dlTensor->byte_offset = 0;
-
-    // TODO: infer the device type from the memory buffer
-    m_dlTensor->device.device_type = kDLCUDA;
-    // TODO: infer the device from the memory buffer
-    m_dlTensor->device.device_id = 0;
-
-    // Convert data
+    m_dlTensor->device.device_type = useDeviceMemory ? kDLCUDA : kDLCPU;
+    m_dlTensor->device.device_id = useDeviceMemory ? deviceId : 0;
 
     void* ptr = reinterpret_cast<void*>(_data);
-    CheckValidCUDABuffer(ptr);
+    if (useDeviceMemory)
+    {
+        ck(cuCtxPushCurrent(context));
+        CheckValidCUDABuffer(ptr);
+        ck(cuCtxPopCurrent(nullptr));
+    }
     m_dlTensor->data = ptr;
 
     // Convert DataType
-    if (_typeStr != "|u1" && _typeStr != "B")  // TODO: can also be other letters
+    if (_typeStr != "|u1" && _typeStr != "B" && _typeStr != "|u2")
     {
         throw std::runtime_error("Could not create DL Pack tensor! Invalid typstr: " + _typeStr);
         return -1;
     }
-    int itemSizeDT = sizeof(uint8_t);// dt.itemsize() 
 
+    int itemSizeDT = sizeof(uint8_t);// dt.itemsize() 
     m_dlTensor->dtype.code = kDLUInt;
     m_dlTensor->dtype.bits = 8;
     m_dlTensor->dtype.lanes = 1;
 
+    if (_typeStr == "|u2")
+    {
+        itemSizeDT = sizeof(uint16_t);
+        m_dlTensor->dtype.bits = 16;
+    }
+
     // Convert ndim
     m_dlTensor->ndim = _shape.size();
+
+    delete[] m_dlTensor->shape;
+    m_dlTensor->shape = nullptr;
+
+    delete[] m_dlTensor->strides;
+    m_dlTensor->strides = nullptr;
 
     // Convert shape
     m_dlTensor->shape = new int64_t[m_dlTensor->ndim];
@@ -217,12 +243,6 @@ int ExternalBuffer::LoadDLPack( std::vector<size_t> _shape, std::vector<size_t> 
     for (int i = 0; i < m_dlTensor->ndim; ++i)
     {
         m_dlTensor->strides[i] = _stride[i];
-        if (m_dlTensor->strides[i] % itemSizeDT != 0)
-        {
-            throw std::runtime_error("Stride must be a multiple of the element size in bytes");
-            return -1;
-        }
-        m_dlTensor->strides[i] /= itemSizeDT;
     }
 
     return 0;

@@ -1,7 +1,7 @@
 /*
  * This copyright notice applies to this file only
  *
- * SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -57,36 +57,42 @@ enum ColorRange {
     UDEF = 2,
 };
 
+
 class NvDemuxer {
 
 protected:
     std::unique_ptr<FFmpegDemuxer> demuxer;
     std::shared_ptr <PacketData> currentPacket;
+    std::unique_ptr <FFmpegDemuxer::PyByteArrayProvider> dataProviderForByteArray;
     bool isEOSReached;
-  
+
 public:
     explicit NvDemuxer(const std::string&);
     
-    uint32_t GetWidth() {return demuxer->GetWidth();}
+    explicit NvDemuxer( std::function<int(py::bytearray)>);
 
-    uint32_t GetHeight() {return demuxer->GetHeight();}
+    uint32_t GetWidth()             {return demuxer->GetWidth();}
 
-    uint32_t GetFrameSize() { return demuxer->GetFrameSize(); }
+    uint32_t GetHeight()            {return demuxer->GetHeight();}
+
+    uint32_t GetFrameSize()         { return demuxer->GetFrameSize(); }
 
     ColorSpace GetColorSpace() const;
 
     ColorRange GetColorRange() const;
 
-    double GetFrameRate() { return demuxer->GetFrameRate(); }
+    double GetFrameRate()           { return demuxer->GetFrameRate(); }
 
 #ifndef DEMUX_ONLY
     cudaVideoCodec GetNvCodecId() {
         return FFmpeg2NvCodecId(demuxer->GetVideoCodec());
     }
 #endif
-    AVPixelFormat GetChromaFormat() {
-        return demuxer->GetChromaFormat();
+
+    cudaVideoChromaFormat GetChromaFormat() {
+        return FFmpeg2NvChromaFormat(demuxer->GetChromaFormat());
     }
+
     int GetBitDepth() {
         return demuxer->GetBitDepth();
     }
@@ -95,7 +101,10 @@ public:
 
     shared_ptr<PacketData> Seek(uint64_t timestamp);
 
+    int IsSeekDone(int64_t decodedFramePTS, int64_t frameIndex);
+
     bool isEOF() { return isEOSReached; }
 
+    uint64_t TimestampFromFrame(uint32_t index) { return demuxer->TsFromFrameNumber(index); }
 
 };

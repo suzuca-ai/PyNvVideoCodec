@@ -1,7 +1,7 @@
 /*
  * This copyright notice applies to this file only
  *
- * SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -34,6 +34,8 @@ namespace py = pybind11;
 // pre and post processing CUDA tasks
 class NvCUStream
 {
+private:
+    bool mApplicationCreatedStream = false;
 public:
     NvCUStream(CUcontext cuDevice, CUstream cuStream, std::unique_ptr<NvEncoderCuda>& pEnc)
     {
@@ -43,10 +45,12 @@ public:
         if (cuStream == 0)
         {
             ck(cuStreamCreate(&inputStream, CU_STREAM_DEFAULT));
+            mApplicationCreatedStream = false;
         }
         else
         {
             inputStream = cuStream;
+            mApplicationCreatedStream = true;
         }
 
         outputStream = inputStream;
@@ -63,15 +67,15 @@ public:
 
         if (inputStream == outputStream)
         {
-            if (inputStream != NULL)
+            if (inputStream != NULL && !mApplicationCreatedStream)
                 ck(cuStreamDestroy(inputStream));
         }
         else
         {
-            if (inputStream != NULL)
+            if (inputStream != NULL && !mApplicationCreatedStream)
                 ck(cuStreamDestroy(inputStream));
 
-            if (outputStream != NULL)
+            if (outputStream != NULL && !mApplicationCreatedStream)
                 ck(cuStreamDestroy(outputStream));
         }
 
@@ -103,14 +107,15 @@ class PyNvEncoder {
 private:
     CUcontext m_CUcontext = nullptr;
     CUstream m_CUstream = nullptr;
-    bool m_bDestroyContext = false;
+    bool m_ReleasePrimaryContext = false;
     std::map<CUdeviceptr, NV_ENC_REGISTERED_PTR> m_mapPtr;
-    std::vector<py::object> m_vecFrameObj;
     size_t m_width;
     size_t m_height;
     uint64_t m_frameNum;
     NV_ENC_BUFFER_FORMAT m_eBufferFormat;
     bool m_bUseCPUInutBuffer;
+    GUID m_encodeGUID;
+    int m_gpuId = 0;
 
     const NvEncInputFrame* GetEncoderInput(py::object _frame);
     const NvEncInputFrame* GetEncoderInputFromCPUBuffer(py::array_t<uint8_t, py::array::c_style | py::array::forcecast> _frame);
@@ -126,8 +131,10 @@ public:
     PyNvEncoder(PyNvEncoder& pyenvc);
     NV_ENC_REGISTERED_PTR RegisterInputFrame(const py::object obj, const CAIMemoryView frame); 
     bool Reconfigure(structEncodeReconfigureParams reconfigureParams);
-    std::vector<uint8_t> Encode(const py::object  frame);
-    std::vector<uint8_t> Encode(); 
+    py::bytes Encode(py::object frame, uint8_t picFlags, SEI_MESSAGE sei);
+    py::bytes Encode(const py::object frame, uint8_t picFlags);
+    py::bytes Encode(py::object _frame);
+    py::bytes Encode();
     void UnregisterInputFrame(const CAIMemoryView frame);
     void InitEncodeReconfigureParams(const NV_ENC_INITIALIZE_PARAMS params);
     structEncodeReconfigureParams GetEncodeReconfigureParams();

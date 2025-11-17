@@ -1,7 +1,7 @@
 /*
  * This copyright notice applies to this file only
  *
- * SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -22,7 +22,7 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
  */
-#pragma once
+
 #include <pybind11/stl.h>
 #include <pybind11/pybind11.h>
 #include "PyCAIMemoryView.hpp"
@@ -54,7 +54,7 @@ CAIMemoryView  coerceToCudaArrayView(py::object cuda_array, NV_ENC_BUFFER_FORMAT
   {
     throw std::runtime_error("__cuda_array_interface__ protocol specifies that stream must not be 0");
   }
-  if (stream == (CUstream)1 || stream == (CUstream)2)  // TODO: legacy vs per-thread default stream
+  if (stream == (CUstream)1 || stream == (CUstream)2)
   {
     stream = nullptr;
   }
@@ -62,12 +62,11 @@ CAIMemoryView  coerceToCudaArrayView(py::object cuda_array, NV_ENC_BUFFER_FORMAT
   std::vector<size_t> expectedShape;
   std::vector<size_t> expectedStrides;
 
-  // TODO: for testing just assume ARG instead of function to handle all cases
   switch (bufferFormat)
   {
     case NV_ENC_BUFFER_FORMAT_NV12:
       {
-        if (typestr != "|u1" && typestr != "B")  // TODO: can also be other letters, could use numpy here: np.dtype(typestr)
+        if (typestr != "|u1" && typestr != "B") 
         {
           throw std::runtime_error("Could not encode CUDA array! Invalid typstr: " + typestr);
         }
@@ -75,9 +74,26 @@ CAIMemoryView  coerceToCudaArrayView(py::object cuda_array, NV_ENC_BUFFER_FORMAT
         expectedStrides = planeIdx == 0 ? std::vector<size_t>{ width, 1, 1 } : std::vector<size_t>{ width / 2 * 2, 2, 1 };
         break;
       }
+    case NV_ENC_BUFFER_FORMAT_IYUV:
+      {
+        if (typestr != "|u1" && typestr != "B")
+        {
+          throw std::runtime_error("Could not encode CUDA array! Invalid typstr: " + typestr);
+        }
+        if (planeIdx == 0) {
+          // Y plane
+          expectedShape = std::vector<size_t>{ height, width, 1 };
+          expectedStrides = std::vector<size_t>{ width, 1, 1 };
+        } else if (planeIdx == 1 || planeIdx == 2) {
+          // U or V plane
+          expectedShape = std::vector<size_t>{ height / 2, width / 2, 1 };
+          expectedStrides = std::vector<size_t>{ width / 2, 1, 1 };
+        }
+        break;
+      }
     case NV_ENC_BUFFER_FORMAT_YUV444:
       {
-        if (typestr != "|u1" && typestr != "B")  // TODO: can also be other letters, could use numpy here: np.dtype(typestr)
+        if (typestr != "|u1" && typestr != "B")
         {
           throw std::runtime_error("Could not encode CUDA array! Invalid typstr: " + typestr);
         }
@@ -87,7 +103,7 @@ CAIMemoryView  coerceToCudaArrayView(py::object cuda_array, NV_ENC_BUFFER_FORMAT
       }
     case NV_ENC_BUFFER_FORMAT_YUV444_10BIT:
       {
-        if (typestr != "|u1" && typestr != "B")  // TODO: can also be other letters, could use numpy here: np.dtype(typestr)
+        if (typestr != "|u2" && typestr != "B")
         {
           throw std::runtime_error("Could not encode CUDA array! Invalid typstr: " + typestr);
         }
@@ -95,9 +111,55 @@ CAIMemoryView  coerceToCudaArrayView(py::object cuda_array, NV_ENC_BUFFER_FORMAT
         expectedStrides = std::vector<size_t>{width*2, 2, 1};
         break;
       }
+#if CHECK_API_VERSION(13,0)
+    case NV_ENC_BUFFER_FORMAT_NV16:
+    {
+        if (typestr != "|u1" && typestr != "B")
+        {
+            throw std::runtime_error("Could not encode CUDA array! Invalid typstr: " + typestr);
+        }
+        if (planeIdx == 0)
+        {
+            expectedShape = std::vector<size_t>{ height, width, 1 };
+            expectedStrides = std::vector<size_t>{ width, 1, 1 };
+        }
+        else if (planeIdx == 1)
+        {
+            expectedShape = std::vector<size_t>{ height, width, 1};
+            expectedStrides = std::vector<size_t>{ width, 1, 1 };
+        }
+        else
+        {
+            throw std::runtime_error("NV16 cannot have more than 2 planees");
+        }
+        break;
+    }
+    case NV_ENC_BUFFER_FORMAT_P210:
+    {
+        if (typestr != "|u2" && typestr != "B")
+        {
+            throw std::runtime_error("Could not encode CUDA array! Invalid typstr: " + typestr);
+        }
+        if (planeIdx == 0)
+        {
+            expectedShape = std::vector<size_t>{ height, width, 1 };
+            expectedStrides = std::vector<size_t>{ width * 2, 2, 1 };
+        }
+        else if (planeIdx == 1)
+        {
+            expectedShape = std::vector<size_t>{ height, width , 1 };
+            expectedStrides = std::vector<size_t>{ width * 2, 2, 1 };
+        }
+        else
+        {
+            throw std::runtime_error("P210 cannot have more than 2 planees");
+        }
+        break;
+    }
+#endif
     case NV_ENC_BUFFER_FORMAT_YUV420_10BIT:
       {
-          if (typestr != "|u1" && typestr != "B")
+          if (typestr != "|u2" && typestr != "B")
           {
               throw std::runtime_error("Could not encode CUDA array! Invalid typestr: " + typestr);
           }
@@ -119,7 +181,7 @@ CAIMemoryView  coerceToCudaArrayView(py::object cuda_array, NV_ENC_BUFFER_FORMAT
       }
     case NV_ENC_BUFFER_FORMAT_YV12 :
       {
-          if (typestr != "|u1" && typestr != "B")  // TODO: can also be other letters, could use numpy here: np.dtype(typestr)
+          if (typestr != "|u1" && typestr != "B")
           {
               throw std::runtime_error("Could not encode CUDA array! Invalid typstr: " + typestr);
           }
@@ -138,7 +200,7 @@ CAIMemoryView  coerceToCudaArrayView(py::object cuda_array, NV_ENC_BUFFER_FORMAT
      case NV_ENC_BUFFER_FORMAT_ARGB10:
       {
           throw std::runtime_error("ARGB10 format not supported in current release. Use YUV444_16BIT or P010");
-          if (typestr != "|u1" && typestr != "B")  // TODO: can also be other letters, could use numpy here: np.dtype(typestr)
+          if (typestr != "|u1" && typestr != "B")
           {
               throw std::runtime_error("Could not encode CUDA array! Invalid typstr: " + typestr);
           }
@@ -149,7 +211,7 @@ CAIMemoryView  coerceToCudaArrayView(py::object cuda_array, NV_ENC_BUFFER_FORMAT
     case NV_ENC_BUFFER_FORMAT_ABGR:
     case NV_ENC_BUFFER_FORMAT_ARGB:
       {
-        if (typestr != "|u1" && typestr != "B")  // TODO: can also be other letters
+        if (typestr != "|u1" && typestr != "B")
         {
           throw std::runtime_error("Could not encode CUDA array! Invalid typstr: " + typestr);
         }

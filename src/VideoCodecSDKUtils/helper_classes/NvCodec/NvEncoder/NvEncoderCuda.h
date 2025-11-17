@@ -1,8 +1,7 @@
 /*
- * This copyright notice applies to this file only
+ * This copyright notice applies to this header file only:
  *
- * SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: MIT
+ * Copyright (c) 2010-2025 NVIDIA Corporation
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -29,8 +28,10 @@
 #include <stdint.h>
 #include <mutex>
 #include <cuda.h>
-#include "NvEncoder.h"
+#include "NvEncoder_121.h"
+#include "NvEncoder_130.h"
 
+#ifndef CUDA_DRVAPI_CALL
 #define CUDA_DRVAPI_CALL( call )                                                                                                 \
     do                                                                                                                           \
     {                                                                                                                            \
@@ -41,10 +42,11 @@
             cuGetErrorName(err__, &szErrName);                                                                                   \
             std::ostringstream errorLog;                                                                                         \
             errorLog << "CUDA driver API error " << szErrName ;                                                                  \
-            throw NVENCException::makeNVENCException(errorLog.str(), NV_ENC_ERR_GENERIC, __FUNCTION__, __FILE__, __LINE__);      \
+            throw PyNvVCException<PyNvVCGenericError>::makePyNvVCException(errorLog.str(), NV_ENC_ERR_GENERIC, __FUNCTION__, __FILE__, __LINE__);      \
         }                                                                                                                        \
     }                                                                                                                            \
     while (0)
+#endif // !1
 
 /**
 *  @brief Encoder for CUDA device memory.
@@ -52,8 +54,9 @@
 class NvEncoderCuda : public NvEncoder
 {
 public:
-    NvEncoderCuda(CUcontext cuContext, CUstream cuStream,uint32_t nWidth, uint32_t nHeight, NV_ENC_BUFFER_FORMAT eBufferFormat,
-        uint32_t nExtraOutputDelay = 3, bool bMotionEstimationOnly = false, bool bOPInVideoMemory = false, bool bUseIVFContainer = true);
+    NvEncoderCuda(CUcontext cuContext,CUstream cuStream,uint32_t nWidth, uint32_t nHeight, NV_ENC_BUFFER_FORMAT eBufferFormat,
+        uint32_t nExtraOutputDelay = 3, bool bMotionEstimationOnly = false, bool bOPInVideoMemory = false, 
+        bool bUseIVFContainer = true, bool bRepeatSequenceHeader = false);
     virtual ~NvEncoderCuda();
 
     /**

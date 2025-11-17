@@ -1,7 +1,7 @@
 
 # This copyright notice applies to this file only
 #
-# SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: MIT
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
@@ -23,38 +23,46 @@
 # DEALINGS IN THE SOFTWARE.
 
 set(FFMPEG_DIR $ENV{FFMPEG_DIR})
+set(NV_FFMPEG_LIBRARIES "")
 set(EMPTY,"")
 if ("${FFMPEG_DIR}" STREQUAL "${EMPTY}")
     set(FFMPEG_DIR ${CMAKE_SOURCE_DIR}/external/ffmpeg)
+	if(${CMAKE_SYSTEM_PROCESSOR} MATCHES AMD64)
+		set(NV_FFMPEG_LIBRARY_DIR "${FFMPEG_DIR}/lib/x64")
+	elseif(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86_64")
+		set(NV_FFMPEG_LIBRARY_DIR "${FFMPEG_DIR}/lib/x86_64")
+	elseif(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "aarch64")
+		set(NV_FFMPEG_LIBRARY_DIR "${FFMPEG_DIR}/lib/aarch64")
+	endif()
+else()
+	if(${CMAKE_SYSTEM_PROCESSOR} MATCHES AMD64)
+		set(NV_FFMPEG_LIBRARY_DIR "${FFMPEG_DIR}/bin")
+	else()
+		set(NV_FFMPEG_LIBRARY_DIR "${FFMPEG_DIR}/lib")
+	endif()
 endif()
 message(STATUS "Using FFMPEG_DIR=${FFMPEG_DIR}")
-set(NV_FFMPEG_INCLUDE_DIR "${FFMPEG_DIR}/include")
-set(NV_FFMPEG_LIBRARIES "")
+set(NV_FFMPEG_INCLUDE_DIR "${FFMPEG_DIR}/include" CACHE INTERNAL NV_FFMPEG_INCLUDE_DIR)
+SET(NV_FFMPEG_LIBRARY_DIR  "${NV_FFMPEG_LIBRARY_DIR}" CACHE INTERNAL "NV_FFMPEG_LIBRARY_DIR")
 
 message(STATUS "Using CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR}")
-if(${CMAKE_SYSTEM_PROCESSOR} MATCHES AMD64)
-	set(NV_FFMPEG_LIBRARY_DIR "${FFMPEG_DIR}/lib/x64")
-elseif(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86_64")
-    set(NV_FFMPEG_LIBRARY_DIR "${FFMPEG_DIR}/lib/x86_64")
-elseif(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "aarch64")
-    set(NV_FFMPEG_LIBRARY_DIR "${FFMPEG_DIR}/lib/aarch64")
-endif()
+
 
 macro(link_av_component target lib_name)
-	if(${CMAKE_SYSTEM_PROCESSOR} MATCHES AMD64)
+	if(${CMAKE_SYSTEM_PROCESSOR} MATCHES "AMD64")
 			find_library(${lib_name}_library
 				NAMES ${lib_name}
-				HINTS "${FFMPEG_DIR}/lib/x64"
+				HINTS "${FFMPEG_DIR}/bin" "${FFMPEG_DIR}/lib" "${FFMPEG_DIR}/lib/x64"
 			)
 	elseif(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86_64")
 			find_library(${lib_name}_library
 				NAMES ${lib_name}
-				HINTS "${FFMPEG_DIR}/lib" "${FFMPEG_DIR}/lib/x86_64"
+				HINTS "${FFMPEG_DIR}/bin" HINTS "${FFMPEG_DIR}/lib" "${FFMPEG_DIR}/lib/x86_64"
 			)
 	elseif(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "aarch64")
 	        find_library(${lib_name}_library
 				NAMES ${lib_name}
-				HINTS "${FFMPEG_DIR}/lib" "${FFMPEG_DIR}/lib/aarch64"
+				HINTS "${FFMPEG_DIR}/bin" "${FFMPEG_DIR}/lib" "${FFMPEG_DIR}/lib/aarch64"
 			)
 	endif()
 	message(STATUS "Link ${${lib_name}_library}")
@@ -65,17 +73,3 @@ link_av_component(VideoCodecSDKUtils avformat)
 link_av_component(VideoCodecSDKUtils avcodec)
 link_av_component(VideoCodecSDKUtils swresample)
 link_av_component(VideoCodecSDKUtils avutil)
-
-
-find_path(
-    BSF_INCLUDE_DIR
-    NAMES "libavcodec/bsf.h"
-    HINTS ${TC_FFMPEG_INCLUDE_DIR} "${NV_FFMPEG_INCLUDE_DIR}"
-)
-if(BSF_INCLUDE_DIR)
-    set(NV_FFMPEG_HAS_BSF TRUE)
-else()
-    set(NV_FFMPEG_HAS_BSF FALSE)
-    message(WARNING "Could not find \"libavcodec/bsf.h\" while other ffmpeg includes could be found."
-        "This likely means that your FFMPEG installation is old. Still trying to compile VPF!")
-endif()

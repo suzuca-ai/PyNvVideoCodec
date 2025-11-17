@@ -1,6 +1,6 @@
 # This copyright notice applies to this file only
 #
-# SPDX-FileCopyrightText: Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: MIT
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
@@ -22,6 +22,7 @@
 # DEALINGS IN THE SOFTWARE.
 
 cmake_minimum_required(VERSION 3.21)
+set(CMAKE_COMPILE_WARNING_AS_ERROR ON)
 project(PyNvVideoCodec)
 set(CMAKE_CXX_STANDARD 17)
 add_subdirectory(src)

@@ -1,7 +1,7 @@
 /*
  * This copyright notice applies to this file only
  *
- * SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -55,20 +55,14 @@ public:
 
 
     ExternalBuffer() = default;
-    py::capsule dlpack(py::object stream) const;
-    int LoadDLPack(std::vector<size_t> _shape, std::vector<size_t> _stride, std::string _typeStr, size_t _streamid, CUdeviceptr _data, bool _readOnly);
+    py::capsule dlpack(py::object consumer_stream, CUstream producer_stream, CUevent producer_stream_event) const;
+    py::tuple dlpackDevice() const;
+    int LoadDLPack(std::vector<size_t> _shape, std::vector<size_t> _stride, std::string _typeStr,
+                   CUdeviceptr _data, bool useDeviceMemory, uint32_t deviceId, const CUcontext context);
 
 private:
-
-
     friend py::detail::type_caster<ExternalBuffer>;
-
     DLPackTensor                    m_dlTensor;
-
-    // __dlpack__ implementation
-
-    // __dlpack_device__ implementation
-    py::tuple dlpackDevice() const;
 };
 
 

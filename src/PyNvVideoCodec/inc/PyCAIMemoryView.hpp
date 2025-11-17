@@ -1,7 +1,7 @@
 /*
  * This copyright notice applies to this file only
  *
- * SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -30,9 +30,12 @@
 #include <pybind11/pybind11.h>
 #include <string>
 #include <vector>
-#include "nvEncodeAPI.h"
+#include "nvEncodeAPI_130.h"
+#include "nvEncodeAPI_121.h"
 #include "NvCodecUtils.h"
 #include "ExternalBuffer.hpp"
+#include "ColorSpace.h"
+#include "NvEncoderClInterface.hpp"
 using namespace std;
 //using namespace chrono;
 
@@ -108,8 +111,11 @@ enum Pixel_Format {
     Pixel_Format_NV12 = 3,
     Pixel_Format_YUV444 = 4,
     Pixel_Format_P016 = 5,
-    Pixel_Format_YUV444_16Bit = 6
-    
+    Pixel_Format_YUV444_16Bit = 6,
+    Pixel_Format_NV16 = 7,
+    Pixel_Format_P216 = 8,
+    Pixel_Format_RGB = 9,
+    Pixel_Format_RGBP = 10,
 };
 
 
@@ -135,10 +141,13 @@ struct CAIMemoryView
 
 struct DecodedFrame
 {
-    int64_t                    timestamp;
+    int64_t timestamp;
     std::vector<CAIMemoryView> views;
     Pixel_Format format;
     std::shared_ptr<ExternalBuffer> extBuf;
+    SEI_MESSAGE seiMessage;
+    size_t decoderStreamEvent;
+    size_t decoderStream;
     DecodedFrame(){
         extBuf = std::make_shared<ExternalBuffer>();
     }

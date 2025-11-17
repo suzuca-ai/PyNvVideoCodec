@@ -1,7 +1,7 @@
 /*
  * This copyright notice applies to this file only
  *
- * SPDX-FileCopyrightText: Copyright (c) 2010-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2010-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -37,13 +37,17 @@
 extern simplelogger::Logger *logger;
 
 #ifndef _WIN32
-inline bool operator==(const GUID &guid1, const GUID &guid2) {
+#ifndef BOOLEAN_OPERATOR_EQ_GUID
+#define BOOLEAN_OPERATOR_EQ_GUID
+#include <cstring>
+static inline bool operator==(const GUID& guid1, const GUID& guid2) {
     return !memcmp(&guid1, &guid2, sizeof(GUID));
 }
 
-inline bool operator!=(const GUID &guid1, const GUID &guid2) {
+static inline bool operator!=(const GUID& guid1, const GUID& guid2) {
     return !(guid1 == guid2);
 }
+#endif
 #endif
 
 /*

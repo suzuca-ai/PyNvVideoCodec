@@ -1,7 +1,7 @@
 /*
  * This copyright notice applies to this file only
  *
- * SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2010-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -26,19 +26,19 @@
 #include "NvEncoder/NvEncoderCuda.h"
 
 
-NvEncoderCuda::NvEncoderCuda(CUcontext cuContext, CUstream cuStream,uint32_t nWidth, uint32_t nHeight, NV_ENC_BUFFER_FORMAT eBufferFormat,
-    uint32_t nExtraOutputDelay, bool bMotionEstimationOnly, bool bOutputInVideoMemory, bool bUseIVFContainer):
-    NvEncoder(NV_ENC_DEVICE_TYPE_CUDA, cuContext, nWidth, nHeight, eBufferFormat, nExtraOutputDelay, bMotionEstimationOnly, bOutputInVideoMemory, false, bUseIVFContainer),
-    m_cuContext(cuContext), m_cuStream(cuStream)
+NvEncoderCuda::NvEncoderCuda(CUcontext cuContext, CUstream cuStream, uint32_t nWidth, uint32_t nHeight, NV_ENC_BUFFER_FORMAT eBufferFormat,
+    uint32_t nExtraOutputDelay, bool bMotionEstimationOnly, bool bOutputInVideoMemory, bool bUseIVFContainer, bool bRepeatSequenceHeader):
+    NvEncoder(NV_ENC_DEVICE_TYPE_CUDA, cuContext, nWidth, nHeight, eBufferFormat, nExtraOutputDelay, bMotionEstimationOnly, bOutputInVideoMemory, false,
+                bUseIVFContainer, bRepeatSequenceHeader), m_cuContext(cuContext), m_cuStream(cuStream)
 {
     if (!m_hEncoder) 
     {
-        NVENC_THROW_ERROR("Encoder Initialization failed", NV_ENC_ERR_INVALID_DEVICE);
+        PYNVVC_THROW_ERROR("Encoder Initialization failed", NV_ENC_ERR_INVALID_DEVICE);
     }
 
     if (!m_cuContext)
     {
-        NVENC_THROW_ERROR("Invalid Cuda Context", NV_ENC_ERR_INVALID_DEVICE);
+        PYNVVC_THROW_ERROR("Invalid Cuda Context", NV_ENC_ERR_INVALID_DEVICE);
     }
 }
 
@@ -51,7 +51,7 @@ void NvEncoderCuda::AllocateInputBuffers(int32_t numInputBuffers)
 {
     if (!IsHWEncoderInitialized())
     {
-        NVENC_THROW_ERROR("Encoder intialization failed", NV_ENC_ERR_ENCODER_NOT_INITIALIZED);
+        PYNVVC_THROW_ERROR("Encoder intialization failed", NV_ENC_ERR_ENCODER_NOT_INITIALIZED);
     }
 
     // for MEOnly mode we need to allocate seperate set of buffers for reference frame
@@ -150,7 +150,7 @@ void NvEncoderCuda::CopyToDeviceFrame(CUcontext device,
 {
     if (srcMemoryType != CU_MEMORYTYPE_HOST && srcMemoryType != CU_MEMORYTYPE_DEVICE)
     {
-        NVENC_THROW_ERROR("Invalid source memory type for copy", NV_ENC_ERR_INVALID_PARAM);
+        PYNVVC_THROW_ERROR("Invalid source memory type for copy", NV_ENC_ERR_INVALID_PARAM);
     }
 
     NVTX_SCOPED_RANGE("CopyToDeviceFrame_aligned")
@@ -184,17 +184,7 @@ void NvEncoderCuda::CopyToDeviceFrame(CUcontext device,
     }
 
     std::vector<uint32_t> srcChromaOffsets;
-    if(_srcChromaOffsets)
-    {
-        for(int plane=0; plane<numChromaPlanes; ++plane)
-        {
-            srcChromaOffsets.push_back(_srcChromaOffsets[plane]);
-        }
-    }
-    else
-    {
-        NvEncoder::GetChromaSubPlaneOffsets(pixelFormat, srcPitch, height, srcChromaOffsets);
-    }
+    NvEncoder::GetChromaSubPlaneOffsets(pixelFormat, srcPitch, height, srcChromaOffsets);
     uint32_t chromaHeight = NvEncoder::GetChromaHeight(pixelFormat, height);
     uint32_t destChromaPitch = NvEncoder::GetChromaPitch(pixelFormat, dstPitch);
     uint32_t srcChromaPitch = NvEncoder::GetChromaPitch(pixelFormat, srcPitch);
@@ -247,7 +237,7 @@ void NvEncoderCuda::CopyToDeviceFrame(CUcontext device,
 {
     if (srcMemoryType != CU_MEMORYTYPE_HOST && srcMemoryType != CU_MEMORYTYPE_DEVICE)
     {
-        NVENC_THROW_ERROR("Invalid source memory type for copy", NV_ENC_ERR_INVALID_PARAM);
+        PYNVVC_THROW_ERROR("Invalid source memory type for copy", NV_ENC_ERR_INVALID_PARAM);
     }
 
     NVTX_SCOPED_RANGE("CopyToDeviceFrame_unaligned")

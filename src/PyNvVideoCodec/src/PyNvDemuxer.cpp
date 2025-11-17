@@ -1,7 +1,7 @@
 /*
  * This copyright notice applies to this file only
  *
- * SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -29,10 +29,50 @@ using namespace chrono;
 
 namespace py = pybind11;
 
-
 PyNvDemuxer::PyNvDemuxer(const std::string& filePath)
 {
-    demuxer.reset(new NvDemuxer(filePath));
+    try {
+        demuxer.reset(new NvDemuxer(filePath));
+    }
+    catch (const PyNvVCException<PyNvVCGenericError>& e) {
+        // Re-throw PyNvVCException as-is
+        throw;
+    }
+    catch (const PyNvVCException<PyNvVCUnsupported>& e) {
+        // Re-throw PyNvVCException as-is
+        throw;
+    }
+    catch (const std::exception& e) {
+        // Convert standard exceptions to PyNvVCException
+        PYNVVC_THROW_ERROR(std::string("PyNvDemuxer constructor failed: ") + e.what(), CUDA_ERROR_UNKNOWN);
+    }
+    catch (...) {
+        // Convert unknown exceptions to PyNvVCException
+        PYNVVC_THROW_ERROR("PyNvDemuxer constructor failed with unknown error", CUDA_ERROR_UNKNOWN);
+    }
+}
+
+PyNvDemuxer::PyNvDemuxer( std::function<int(py::bytearray)> callback)
+{
+    try {
+        demuxer.reset(new NvDemuxer(callback));
+    }
+    catch (const PyNvVCException<PyNvVCGenericError>& e) {
+        // Re-throw PyNvVCException as-is
+        throw;
+    }
+    catch (const PyNvVCException<PyNvVCUnsupported>& e) {
+        // Re-throw PyNvVCException as-is
+        throw;
+    }
+    catch (const std::exception& e) {
+        // Convert standard exceptions to PyNvVCException
+        PYNVVC_THROW_ERROR(std::string("PyNvDemuxer constructor failed: ") + e.what(), CUDA_ERROR_UNKNOWN);
+    }
+    catch (...) {
+        // Convert unknown exceptions to PyNvVCException
+        PYNVVC_THROW_ERROR("PyNvDemuxer constructor failed with unknown error", CUDA_ERROR_UNKNOWN);
+    }
 }
 shared_ptr<PacketData> PyNvDemuxer::Demux()
 {
@@ -71,6 +111,20 @@ void Init_PyNvDemuxer(py::module& m)
         Initialize decoder with set of particular
         parameters
         :param _filename: provided mp4 or encoded bitstream data
+    )pbdoc")
+        .def("CreateDemuxer",
+            [](
+                std::function<int(py::bytearray)> callback
+                )
+            {
+                return std::make_shared<PyNvDemuxer>(callback);
+            },
+            py::arg("callback"),
+            
+            R"pbdoc(
+        Initialize decoder with set of particular
+        parameters
+        :param _filename: bytearray to file
     )pbdoc");
 
     py::class_<PacketData, shared_ptr<PacketData>>(m, "PacketData", py::module_local())
@@ -82,6 +136,9 @@ void Init_PyNvDemuxer(py::module& m)
         .def_readwrite("bsl", &PacketData::bsl)
         .def_readwrite("bsl_data", &PacketData::bsl_data)
         .def_readwrite("duration", &PacketData::duration)
+        .def_readwrite("seek_pts", &PacketData::seek_pts)
+        .def_readwrite("bDiscontinuity", &PacketData::bDiscontinuity)
+        .def_readwrite("decode_flag", &PacketData::decode_flag)
         .def("__repr__", [](shared_ptr<PacketData> self) {
         stringstream ss;
         ss << "key:      " << self->key << "\n";
@@ -91,6 +148,7 @@ void Init_PyNvDemuxer(py::module& m)
         ss << "bsl:      " << self->bsl << "\n";
         ss << "bsl_data:      " << self->bsl_data << "\n";
         ss << "duration: " << self->duration << "\n";
+        ss << "decode flag: " << self->decode_flag << "\n";
         return ss.str();
             });
     py::class_<PyNvDemuxer, shared_ptr<PyNvDemuxer>>(m, "PyNvDemuxer", py::module_local())
@@ -101,14 +159,6 @@ void Init_PyNvDemuxer(py::module& m)
 
         :param None: None
     )pbdoc")
-          .def(
-            "Width",
-            [](shared_ptr<PyNvDemuxer> self) {
-                return self->Width();
-            },
-                R"pbdoc(
-            Returns Width of Stream
-    )pbdoc")
         .def(
             "Height",
             [](shared_ptr<PyNvDemuxer> self) {
@@ -116,6 +166,22 @@ void Init_PyNvDemuxer(py::module& m)
             },
                 R"pbdoc(
             Returns Height of Stream
+    )pbdoc")
+        .def(
+            "Width",
+            [](shared_ptr<PyNvDemuxer> self) {
+                return self->Width();
+            },
+            R"pbdoc(
+            Returns Width of Stream
+    )pbdoc")
+                .def(
+                    "BitDepth",
+                    [](shared_ptr<PyNvDemuxer> self) {
+                        return self->BitDepth();
+                    },
+                    R"pbdoc(
+            Returns BitDepth of Stream
     )pbdoc")
                 .def(
                     "FrameRate",
@@ -175,18 +241,6 @@ void Init_PyNvDemuxer(py::module& m)
             gets the next element in Iterator over demuxer object
     )pbdoc")
         .def(
-            "Demux",
-            [](shared_ptr<PyNvDemuxer> self) {
-                return self->Demux();
-            },
-            py::return_value_policy::reference,
-                R"pbdoc(
-        Extract single compressed video packet and sends it to application.
-
-        :param None: None
-        :return: PacketData is returned
-    )pbdoc")
-        .def(
           "Demux",
           [](shared_ptr<PyNvDemuxer> self) {
             return self->Demux();
@@ -200,12 +254,24 @@ void Init_PyNvDemuxer(py::module& m)
     )pbdoc")
     .def(
           "Seek",
-          [](shared_ptr<PyNvDemuxer> self, float& timestamp) {
-            uint64_t tmptimestamp = timestamp * 1000;
-            return self->Seek(tmptimestamp);
+          [](shared_ptr<PyNvDemuxer> self, uint64_t frameIndex) {
+            
+            return self->Seek(frameIndex);
              },
           py::return_value_policy::reference,
           R"pbdoc(
+        Seek to nearest keyframe at given timestamp, extract single compressed video packet and sends it to application.
+
+        :param None: None
+        :return: PacketData is returned
+    )pbdoc")
+                .def(
+                    "isSeekDone",
+                    [](shared_ptr<PyNvDemuxer> self,int64_t decodedFramePTS, uint64_t frameIndex) {
+                        return self->isSeekDone(decodedFramePTS, frameIndex);
+                    },
+                    py::return_value_policy::reference,
+                    R"pbdoc(
         Seek to nearest keyframe at given timestamp, extract single compressed video packet and sends it to application.
 
         :param None: None
@@ -225,6 +291,30 @@ void Init_PyNvDemuxer(py::module& m)
         :return: Nv Codec Id is returned, this function is not available in demux only mode
     )pbdoc")
 #endif
+            .def(
+                "ChromaFormat",
+                [](shared_ptr<PyNvDemuxer> self) {
+                    return self->ChromaFormat();
+                },
+                py::return_value_policy::reference,
+                    R"pbdoc(
+        Return chroma format corresponding to NvDec
+
+        :param None: None
+        :return: ChromaFormat
+    )pbdoc")
+                .def(
+                    "TimestampFromFrame",
+                    [](shared_ptr<PyNvDemuxer> self, uint32_t frameIndex) {
+                        return self->TimestampFromFrame(frameIndex);
+                    },
+                    py::return_value_policy::reference,
+                        R"pbdoc(
+        estimate timestamp from the frame index and sends it to application.
+
+        :param None: None
+        :return: uint64_t timestamp is returned
+    )pbdoc")
         ;
 }
 

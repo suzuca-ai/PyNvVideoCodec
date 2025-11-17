@@ -1,7 +1,7 @@
 /*
  * This copyright notice applies to this file only
  *
- * SPDX-FileCopyrightText: Copyright (c) 2010-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2010-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -71,3 +71,17 @@ union RGBA64 {
         uint16_t r, g, b, a;
     } c;
 };
+
+union RGB24 {
+    uchar3 d;
+    uchar3 v;
+    struct {
+        uint8_t r, g, b;
+    } c;
+};
+
+struct uchar3_2 {
+    uchar3 x;
+    uchar3 y;
+};
+

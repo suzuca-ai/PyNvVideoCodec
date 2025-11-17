@@ -5,10 +5,10 @@ includedir=/usr/local/include
 
 Name: libavutil
 Description: FFmpeg utility library
-Version: 
+Version: 59.8.100
 Requires: 
 Requires.private: 
 Conflicts:
 Libs: -L${libdir}  -lavutil 
-Libs.private: -pthread -lm
+Libs.private: -pthread -lm -ldrm -lX11
 Cflags: -I${includedir}

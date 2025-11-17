@@ -1,7 +1,7 @@
 /*
  * This copyright notice applies to this file only
  *
- * SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -40,18 +40,37 @@ NvDemuxer::NvDemuxer(const std::string& inputfile)
     isEOSReached = false;
 }
 
+NvDemuxer::NvDemuxer(std::function<int(py::bytearray)> callback)
+{
+    dataProviderForByteArray.reset(new FFmpegDemuxer::PyByteArrayProvider(callback));
+    demuxer.reset(new FFmpegDemuxer(dataProviderForByteArray.get()));
+    currentPacket.reset(new PacketData());
+    isEOSReached = false;
+}
+
 shared_ptr<PacketData> NvDemuxer::Demux()
 {
     int nVideoBytes = 0, nFrameReturned = 0, nFrame = 0;
     uint8_t* pVideo = NULL, * pFrame;
+    int64_t pts = 0;
+    int64_t dts = 0;
+    uint64_t duration = 0;
+    uint64_t pos = 0;
+    bool keyFrame = false;
+
     memset(currentPacket.get(), 0, sizeof(PacketData));
 
-    if (demuxer->Demux(&pVideo, &nVideoBytes))
+    if (demuxer->Demux(&pVideo, &nVideoBytes, pts, dts, duration, pos, keyFrame))
     {
         if (nVideoBytes)
         {
             currentPacket.get()->bsl_data = (uintptr_t)pVideo;
             currentPacket.get()->bsl = nVideoBytes;
+            currentPacket.get()->pts = pts;
+            currentPacket.get()->dts = dts;
+            currentPacket.get()->duration = duration;
+            currentPacket.get()->pos = pos;
+            currentPacket.get()->key = keyFrame;
         }
     }
     else
@@ -61,16 +80,26 @@ shared_ptr<PacketData> NvDemuxer::Demux()
     return currentPacket;
 }
 
+int NvDemuxer::IsSeekDone(int64_t decodedFramePTS, int64_t frameIndex)
+{
+    return demuxer->is_seek_done(decodedFramePTS, frameIndex);
+}
+
 shared_ptr<PacketData> NvDemuxer:: Seek(uint64_t timestamp)
 {
     int nVideoBytes = 0, nFrameReturned = 0, nFrame = 0;
     uint8_t* pVideo = NULL, * pFrame;
+
     SeekContext ctx;
     ctx.seek_frame = timestamp;
-    if (demuxer->Seek(ctx, &pVideo, &nVideoBytes))
+    ctx.crit = BY_NUMBER;
+    ctx.mode = EXACT_FRAME;
+
+    if (demuxer-> Seek(ctx, &pVideo, &nVideoBytes))
     {
         currentPacket.get()->bsl_data = (uintptr_t)pVideo;
         currentPacket.get()->bsl = nVideoBytes;
+        currentPacket.get()->pts = ctx.out_frame_pts;
     }
     return currentPacket;
 }

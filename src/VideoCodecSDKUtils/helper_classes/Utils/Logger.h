@@ -1,7 +1,7 @@
 /*
  * This copyright notice applies to this file only
  *
- * SPDX-FileCopyrightText: Copyright (c) 2010-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2010-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -31,6 +31,8 @@
 #include <sstream>
 #include <mutex>
 #include <time.h>
+#include <algorithm>
+#include <cctype>
 
 #ifdef _WIN32
 #include <winsock.h>
@@ -49,6 +51,7 @@
 
 enum LogLevel {
     TRACE,
+    DEBUG,
     INFO,
     WARNING,
     ERROR,
@@ -70,7 +73,7 @@ public:
             sprintf(szLead, "[?????] ");
             return szLead;
         }
-        const char *szLevels[] = {"TRACE", "INFO", "WARN", "ERROR", "FATAL"};
+        const char *szLevels[] = {"TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"};
         if (bPrintTimeStamp) {
             time_t t = time(NULL);
             struct tm *ptm = localtime(&t);
@@ -97,17 +100,37 @@ private:
 class LoggerFactory {
 public:
     static Logger* CreateFileLogger(std::string strFilePath, 
-            LogLevel level = INFO, bool bPrintTimeStamp = true) {
+            LogLevel level = GetLogLevelFromEnv(), bool bPrintTimeStamp = true) {
         return new FileLogger(strFilePath, level, bPrintTimeStamp);
     }
-    static Logger* CreateConsoleLogger(LogLevel level = INFO, 
+    static Logger* CreateConsoleLogger(LogLevel level = GetLogLevelFromEnv(), 
             bool bPrintTimeStamp = true) {
         return new ConsoleLogger(level, bPrintTimeStamp);
     }
-    static Logger* CreateUdpLogger(char *szHost, unsigned uPort, LogLevel level = INFO, 
+    static Logger* CreateUdpLogger(char *szHost, unsigned uPort, LogLevel level = GetLogLevelFromEnv(), 
             bool bPrintTimeStamp = true) {
         return new UdpLogger(szHost, uPort, level, bPrintTimeStamp);
     }
+
+    static LogLevel GetLogLevelFromEnv() {
+        const char* envLevel = std::getenv("LOGGER_LEVEL");
+        if (!envLevel) {
+            return INFO;  // Default level
+        }
+        
+        std::string level(envLevel);
+        std::transform(level.begin(), level.end(), level.begin(), ::toupper);
+        
+        if (level == "TRACE") return TRACE;
+        if (level == "DEBUG") return DEBUG;
+        if (level == "INFO") return INFO;
+        if (level == "WARN") return WARNING;
+        if (level == "ERROR") return ERROR;
+        if (level == "FATAL") return FATAL;
+        
+        return INFO;  // Default if invalid value
+    }
+
 private:
     LoggerFactory() {}
 

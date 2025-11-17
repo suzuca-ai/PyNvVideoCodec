@@ -1,7 +1,7 @@
 /*
  * This copyright notice applies to this file only
  *
- * SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -63,6 +63,8 @@ enum Pixel_Format {
     YUV444_10BIT = 11,
     ARGB10 = 12,
     P010 = 13,
+    NV16 = 14,
+    P210 = 15,
 };
 
 NvEncoderClInterface::NvEncoderClInterface(const map<string, string>& params)
@@ -271,6 +273,12 @@ template <> Pixel_Format FromString(const string& value) {
     else if ("YUV444_10BIT" == value) {
         return YUV444_10BIT;
     }
+    else if ("NV16" == value) {
+        return NV16;
+    }
+    else if ("P210" == value) {
+        return P210;
+    }
     else if ("ABGR" == value) {
         return ABGR;
     }
@@ -282,7 +290,6 @@ template <> Pixel_Format FromString(const string& value) {
     }
 }
 
-#if CHECK_API_VERSION(10, 0)
 template <> NV_ENC_TUNING_INFO FromString(const string& value) {
     if ("high_quality" == value) {
         return NV_ENC_TUNING_INFO_HIGH_QUALITY;
@@ -330,7 +337,7 @@ string ToString(NV_ENC_TUNING_INFO info) {
         return string("");
     }
 }
-#endif
+
 
 string ToString(const GUID& guid) {
     // Codecs;
@@ -421,10 +428,10 @@ void PrintNvEncInitializeParams(const NV_ENC_INITIALIZE_PARAMS& params) {
         << endl;
     cout << " presetGUID:                      " << ToString(params.presetGUID)
         << endl;
-#if CHECK_API_VERSION(10, 0)
+
     cout << " tuningInfo:                      " << ToString(params.tuningInfo)
         << endl;
-#endif
+
     cout << " encodeWidth:                     " << params.encodeWidth << endl;
     cout << " encodeHeight:                    " << params.encodeHeight << endl;
     cout << " darWidth:                        " << params.darWidth << endl;
@@ -485,6 +492,12 @@ void NvEncoderClInterface::SetupInitParams(NV_ENC_INITIALIZE_PARAMS& params,
     NV_ENCODE_API_FUNCTION_LIST api_func,
     void* encoder,
     bool print_settings) const {
+    // Override print_settings if LOGGER_LEVEL is set to DEBUG
+    const char* envLevel = std::getenv("LOGGER_LEVEL");
+    if (envLevel && (strcmp(envLevel, "DEBUG") == 0 || strcmp(envLevel, "debug") == 0)) {
+        print_settings = true;
+    }
+
     if (!is_reconfigure) {
         auto enc_config = params.encodeConfig;
         memset(&params, 0, sizeof(params));
@@ -510,9 +523,9 @@ void NvEncoderClInterface::SetupInitParams(NV_ENC_INITIALIZE_PARAMS& params,
     parent_params.colorSpace = FindAttribute(options, "colorspace");
 
     // Preset;
-#if CHECK_API_VERSION(10, 0)
+
     NV_ENC_TUNING_INFO tuningInfo = NV_ENC_TUNING_INFO_UNDEFINED;
-#endif
+
     auto preset = FindAttribute(options, "preset");
     if (preset.empty())
     {
@@ -525,7 +538,7 @@ void NvEncoderClInterface::SetupInitParams(NV_ENC_INITIALIZE_PARAMS& params,
         parent_params.is_low_latency = props.is_low_latency;
         parent_params.is_sdk_10_preset = false;
 
-#if CHECK_API_VERSION(10, 0)
+
         // Handle SDK 10+ tuning info option;
         if (props.is_sdk10_preset) {
             parent_params.is_sdk_10_preset = true;
@@ -545,7 +558,7 @@ void NvEncoderClInterface::SetupInitParams(NV_ENC_INITIALIZE_PARAMS& params,
                 parent_params.is_lossless = true;
             }
         }
-#endif
+
     }
 
     // Max resolution;
@@ -664,7 +677,6 @@ void NvEncoderClInterface::SetupEncConfig(NV_ENC_CONFIG& config,
     bool is_reconfigure,
     bool print_settings) const {
     if (!is_reconfigure) {
-        config.frameIntervalP = 1;
         config.gopLength = NVENC_INFINITE_GOPLENGTH;
         config.profileGUID = NV_ENC_CODEC_PROFILE_AUTOSELECT_GUID;
     }
@@ -672,7 +684,7 @@ void NvEncoderClInterface::SetupEncConfig(NV_ENC_CONFIG& config,
     // Consequtive B frames number;
     auto b_frames = FindAttribute(options, "bf");
     if (!b_frames.empty()) {
-        config.frameIntervalP = FromString<int>(b_frames);
+        config.frameIntervalP = FromString<int>(b_frames) + 1;
     }
 
     // GOP size;
@@ -805,11 +817,11 @@ void PrintNvEncRcParams(const NV_ENC_RC_PARAMS& params) {
     cout << " version:                         " << params.version << endl;
     cout << " rateControlMode:                 " << params.rateControlMode
         << endl;
-#if CHECK_API_VERSION(10, 0)
+
     cout << " multiPass:                       " << params.multiPass << endl;
     cout << " lowDelayKeyFrameScale:           "
         << (int)params.lowDelayKeyFrameScale << endl;
-#endif
+
     cout << " constQP:                         " << params.constQP.qpInterP
         << ", " << params.constQP.qpInterB << ", " << params.constQP.qpIntra
         << endl;
@@ -874,23 +886,12 @@ void NvEncoderClInterface::SetupRateControl(NV_ENC_RC_PARAMS& params,
         /* If bitrate is explicitly provided, set BRC mode
          * to CBR or LL CBR and override later within this function
          * if BRC is also explicitly set; */
-#if CHECK_API_VERSION(10, 0)
-        if (parent_params.is_sdk_10_preset) {
-            // According to SDK 10 recommendations;
-            if (parent_params.is_low_latency) {
-                params.rateControlMode = NV_ENC_PARAMS_RC_CBR;
-                params.multiPass = NV_ENC_TWO_PASS_QUARTER_RESOLUTION;
-                params.lowDelayKeyFrameScale = 1;
-            }
-        }
-        else
-#endif
-        {
-            params.rateControlMode = NV_ENC_PARAMS_RC_CBR;
-        }
+        
+         params.rateControlMode = NV_ENC_PARAMS_RC_CBR;
+        
     }
 
-#if CHECK_API_VERSION(10, 0)
+
     // Multi-pass mode;
     auto multipass = FindAttribute(options, "multipass");
     if (!multipass.empty()) {
@@ -902,7 +903,6 @@ void NvEncoderClInterface::SetupRateControl(NV_ENC_RC_PARAMS& params,
     if (!ldkfs.empty()) {
         params.lowDelayKeyFrameScale = 1;
     }
-#endif
 
     // Max bitrate;
     auto max_br = FindAttribute(options, "maxbitrate");
@@ -989,7 +989,7 @@ void NvEncoderClInterface::SetupRateControl(NV_ENC_RC_PARAMS& params,
     }
 }
 
-#if CHECK_API_VERSION(9, 1)
+
 auto ParseNumRefFrames = [](string& value, NV_ENC_NUM_REF_FRAMES& num_frames) {
     auto num_ref_frames = FromString<uint32_t>(value);
     auto valid_range = num_ref_frames > (int)NV_ENC_NUM_REF_FRAMES_AUTOSELECT;
@@ -999,7 +999,7 @@ auto ParseNumRefFrames = [](string& value, NV_ENC_NUM_REF_FRAMES& num_frames) {
         num_frames = (NV_ENC_NUM_REF_FRAMES)num_ref_frames;
     }
 };
-#endif
+
 
 void PrintNvEncH264Config(const NV_ENC_CONFIG_H264& config) {
     cout << "NV_ENC_CONFIG_H264 :              " << endl;
@@ -1030,10 +1030,10 @@ void PrintNvEncH264Config(const NV_ENC_CONFIG_H264& config) {
         << config.qpPrimeYZeroTransformBypassFlag << endl;
     cout << " useConstrainedIntraPred:         " << config.useConstrainedIntraPred
         << endl;
-#if CHECK_API_VERSION(9, 1)
+
     cout << " enableFillerDataInsertion:       "
         << config.enableFillerDataInsertion << endl;
-#endif
+
     cout << " level:                           " << config.level << endl;
     cout << " idrPeriod:                       " << config.idrPeriod << endl;
     cout << " separateColourPlaneFlag:         " << config.separateColourPlaneFlag
@@ -1067,11 +1067,11 @@ void PrintNvEncH264Config(const NV_ENC_CONFIG_H264& config) {
         << endl;
     cout << " useBFramesAsRef:                 " << config.useBFramesAsRef
         << endl;
-#if CHECK_API_VERSION(9, 1)
+
     cout << " numRefL0:                        " << config.numRefL0 << endl;
     cout << " numRefL1:                        " << config.numRefL1 << endl
         << endl;
-#endif
+
 }
 
 void NvEncoderClInterface::SetupAV1Config(NV_ENC_CONFIG_AV1& config,
@@ -1090,7 +1090,15 @@ void NvEncoderClInterface::SetupAV1Config(NV_ENC_CONFIG_AV1& config,
         if (YUV444 == pix_fmt || YUV444_10BIT == pix_fmt) {
             config.chromaFormatIDC = 3;
         }
-        bool is10bit = pix_fmt == P010 || pix_fmt == YUV444_10BIT || pix_fmt == ARGB10;
+        else if (NV16 == pix_fmt || P210 == pix_fmt)
+        {
+            config.chromaFormatIDC = 2;
+        }
+        bool is10bit = false;
+        if (YUV444_10BIT == pix_fmt || ARGB10 == pix_fmt || P010 == pix_fmt || P210 == pix_fmt)
+        {
+            is10bit = true;
+        }
 #if CHECK_API_VERSION(12, 2)
         config.inputBitDepth = config.outputBitDepth = is10bit ? NV_ENC_BIT_DEPTH_10 : NV_ENC_BIT_DEPTH_8;
 #else
@@ -1122,7 +1130,7 @@ void NvEncoderClInterface::SetupAV1Config(NV_ENC_CONFIG_AV1& config,
         auto colorSpace = parent_params.colorSpace;
         config.transferCharacteristics = FromString<NV_ENC_VUI_TRANSFER_CHARACTERISTIC>(colorSpace);
         config.matrixCoefficients = FromString<NV_ENC_VUI_MATRIX_COEFFS>(colorSpace);
-        config.colorRange = 1; //todo: studio / full?
+        config.colorRange = 1;
         config.colorPrimaries = FromString<NV_ENC_VUI_COLOR_PRIMARIES>(colorSpace);
     }
     else if (!is_reconfigure)
@@ -1153,6 +1161,16 @@ void NvEncoderClInterface::SetupH264Config(NV_ENC_CONFIG_H264& config,
         if (YUV444 == pix_fmt || YUV444_10BIT == pix_fmt) {
             config.chromaFormatIDC = 3;
         }
+        else if (NV16 == pix_fmt || P210 == pix_fmt)
+        {
+            config.chromaFormatIDC = 2;
+        }
+        if (YUV444_10BIT == pix_fmt || ARGB10 == pix_fmt || P010 == pix_fmt || P210 == pix_fmt) {
+#if CHECK_API_VERSION(13, 0)
+            config.inputBitDepth = NV_ENC_BIT_DEPTH_10;
+            config.outputBitDepth = NV_ENC_BIT_DEPTH_10;
+#endif
+        }
     }
 
     auto repeatSPSPPS = FindAttribute(options, "repeatspspps");
@@ -1163,7 +1181,7 @@ void NvEncoderClInterface::SetupH264Config(NV_ENC_CONFIG_H264& config,
 
     config.idrPeriod = parent_params.gop_length;
 
-#if CHECK_API_VERSION(9, 1)
+
     // IDR period;
     auto idr_period = FindAttribute(options, "idrperiod");
     if (!idr_period.empty()) {
@@ -1180,7 +1198,7 @@ void NvEncoderClInterface::SetupH264Config(NV_ENC_CONFIG_H264& config,
     if (!num_ref_l1.empty()) {
         ParseNumRefFrames(num_ref_l1, config.numRefL1);
     }
-#endif
+
 
     SetupVuiConfig(config.h264VUIParameters, parent_params, is_reconfigure,
         print_settings);
@@ -1264,10 +1282,15 @@ void NvEncoderClInterface::SetupHEVCConfig(NV_ENC_CONFIG_HEVC& config,
     auto format = FindAttribute(options, "fmt");
     if (!format.empty()) {
         auto pix_fmt = FromString<Pixel_Format>(format);
-        if (YUV444 == pix_fmt || YUV444_10BIT == pix_fmt) {
+        if (YUV444 == pix_fmt || YUV444_10BIT == pix_fmt) 
+        {
             config.chromaFormatIDC = 3;
         }
-        if (YUV444_10BIT == pix_fmt || ARGB10 == pix_fmt || P010 == pix_fmt) {
+        else if (NV16 == pix_fmt || P210 == pix_fmt)
+        {
+            config.chromaFormatIDC = 2;
+        }
+        if (YUV444_10BIT == pix_fmt || ARGB10 == pix_fmt || P010 == pix_fmt || P210 == pix_fmt) {
 #if CHECK_API_VERSION(12, 2)
             config.inputBitDepth = NV_ENC_BIT_DEPTH_10;
             config.outputBitDepth = NV_ENC_BIT_DEPTH_10;

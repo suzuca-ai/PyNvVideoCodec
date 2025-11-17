@@ -1,7 +1,7 @@
 /*
  * This copyright notice applies to this file only
  *
- * SPDX-FileCopyrightText: Copyright (c) 2010-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2010-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -79,13 +79,13 @@ typedef enum {
 
 /************************************************************************/
 //! \ingroup STRUCTS
-//! \struct HEVCTIMECODESET
-//! Used to store Time code extracted from Time code SEI in HEVC codec
+//! \struct TIMECODESET
+//! Used to store Time code set extracted from H264 and HEVC codecs
 /************************************************************************/
-typedef struct _HEVCTIMECODESET
+typedef struct _TIMECODESET
 {
     unsigned int time_offset_value;
-    unsigned short n_frames;                 
+    unsigned short n_frames;
     unsigned char clock_timestamp_flag;
     unsigned char units_field_based_flag;
     unsigned char counting_type;
@@ -100,18 +100,70 @@ typedef struct _HEVCTIMECODESET
     unsigned char hours_flag;
     unsigned char time_offset_length;
     unsigned char reserved;
-} HEVCTIMECODESET;
+} TIMECODESET;
 
 /************************************************************************/
 //! \ingroup STRUCTS
-//! \struct HEVCSEITIMECODE
-//! Used to extract Time code SEI in HEVC codec
+//! \struct TIMECODE
+//! Used to extract Time code in H264 and HEVC codecs
 /************************************************************************/
-typedef struct _HEVCSEITIMECODE
+typedef struct _TIMECODE
 {
-    HEVCTIMECODESET time_code_set[MAX_CLOCK_TS];
+    TIMECODESET time_code_set[MAX_CLOCK_TS];
     unsigned char num_clock_ts;
-} HEVCSEITIMECODE;
+} TIMECODE;
+
+/**********************************************************************************/
+//! \ingroup STRUCTS
+//! \struct SEIMASTERINGDISPLAYINFO
+//! Used to extract mastering display color volume SEI in H264 and HEVC codecs
+/**********************************************************************************/
+typedef struct _SEIMASTERINGDISPLAYINFO
+{
+    unsigned short display_primaries_x[3];
+    unsigned short display_primaries_y[3];
+    unsigned short white_point_x;
+    unsigned short white_point_y;
+    unsigned int max_display_mastering_luminance;
+    unsigned int min_display_mastering_luminance;
+} SEIMASTERINGDISPLAYINFO;
+
+/**********************************************************************************/
+//! \ingroup STRUCTS
+//! \struct SEICONTENTLIGHTLEVELINFO
+//! Used to extract content light level info SEI in H264 and HEVC codecs
+/**********************************************************************************/
+typedef struct _SEICONTENTLIGHTLEVELINFO
+{
+    unsigned short max_content_light_level;
+    unsigned short max_pic_average_light_level;
+    unsigned int reserved;
+} SEICONTENTLIGHTLEVELINFO;
+
+/**********************************************************************************/
+//! \ingroup STRUCTS
+//! \struct TIMECODEMPEG2
+//! Used to extract Time code in MPEG2 codec
+/**********************************************************************************/
+typedef struct _TIMECODEMPEG2
+{
+    unsigned char drop_frame_flag;
+    unsigned char time_code_hours;
+    unsigned char time_code_minutes;
+    unsigned char marker_bit;
+    unsigned char time_code_seconds;
+    unsigned char time_code_pictures;
+} TIMECODEMPEG2;
+
+/**********************************************************************************/
+//! \ingroup STRUCTS
+//! \struct SEIALTERNATIVETRANSFERCHARACTERISTICS
+//! Used to extract alternative transfer characteristics SEI in H264 and HEVC codecs
+/**********************************************************************************/
+typedef struct _SEIALTERNATIVETRANSFERCHARACTERISTICS
+{
+    unsigned char preferred_transfer_characteristics;
+} SEIALTERNATIVETRANSFERCHARACTERISTICS;
 
 /**********************************************************************************/
 //! \ingroup STRUCTS

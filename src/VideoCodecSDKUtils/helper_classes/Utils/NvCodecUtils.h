@@ -1,7 +1,7 @@
 /*
  * This copyright notice applies to this file only
  *
- * SPDX-FileCopyrightText: Copyright (c) 2010-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2010-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -43,6 +43,7 @@
 #include <thread>
 #include <list>
 #include <vector>
+#include <unordered_map>
 #include <condition_variable>
 #ifndef DEMUX_ONLY
 #include <cuda.h>
@@ -50,6 +51,16 @@
 
 extern simplelogger::Logger *logger;
 
+struct SessionStats
+{
+    int64_t initTime = 0;   // session initialization time
+    int64_t decodeTime = 0; // time taken by actual decoding operation
+    int frames = 0;     // number of frames decoded
+};
+
+
+// #define SEI_MESSAGE std::vector<std::pair<std::vector<unsigned char>, std::vector<unsigned char>>>
+using SEI_MESSAGE = std::vector<std::pair<std::unordered_map<std::string, unsigned char>, std::vector<unsigned char>>>;
 
 struct PacketData {
     int32_t key;
@@ -59,6 +70,9 @@ struct PacketData {
     uintptr_t bsl_data;
     uint64_t bsl;
     uint64_t duration;
+    int32_t bDiscontinuity;
+    int64_t seek_pts;
+    int8_t decode_flag = 0;
 };
 
 #ifdef __cuda_cuda_h__
@@ -166,6 +180,59 @@ inline bool check(int e, int iLine, const char *szFile) {
 #define MAKE_FOURCC( ch0, ch1, ch2, ch3 )                               \
                 ( (uint32_t)(uint8_t)(ch0) | ( (uint32_t)(uint8_t)(ch1) << 8 ) |    \
                 ( (uint32_t)(uint8_t)(ch2) << 16 ) | ( (uint32_t)(uint8_t)(ch3) << 24 ) )
+#define MAKE_STRING(x) #x
+
+/**
+* @brief Emptly classes to differentiate the exceptions.
+*/
+class PyNvVCUnsupported  {};
+class PyNvVCGenericError {};
+
+/**
+* @brief Exception class for error reporting.
+*/
+template <typename T>
+class PyNvVCException : public std::exception
+{
+public:
+    PyNvVCException(const std::string& errorStr, const int errorCode)
+        : m_errorString(errorStr), m_errorCode(errorCode) {}
+
+    virtual ~PyNvVCException() throw() {}
+    virtual const char* what() const throw() { return m_errorString.c_str(); }
+    int  getErrorCode() const { return m_errorCode; }
+    const std::string& getErrorString() const { return m_errorString; }
+    static PyNvVCException makePyNvVCException(const std::string& errorStr, const int errorCode,
+        const std::string& functionName, const std::string& fileName, int lineNo);
+private:
+    std::string m_errorString;
+    int m_errorCode;
+};
+
+template <typename T>
+inline PyNvVCException<T> PyNvVCException<T>::makePyNvVCException(const std::string& errorStr, const int errorCode, const std::string& functionName,
+    const std::string& fileName, int lineNo)
+{
+    std::ostringstream errorLog;
+    errorLog << functionName << " : " << std::endl
+             << "Error code : " << errorCode << std::endl
+             << "Error Type : " << errorStr  << std::endl
+             << "at " << fileName << ":" << lineNo << std::endl;
+    PyNvVCException<T> exception(errorLog.str(), errorCode);
+    return exception;
+}
+
+#define PYNVVC_THROW_ERROR( errorStr, errorCode )                                                          \
+    do                                                                                                     \
+    {                                                                                                      \
+        throw PyNvVCException<PyNvVCGenericError>::makePyNvVCException(errorStr, errorCode, __FUNCTION__, __FILE__, __LINE__); \
+    } while (0)
+
+#define PYNVVC_THROW_ERROR_UNSUPPORTED( errorStr, errorCode )                                                                    \
+    do                                                                                                                           \
+    {                                                                                                                            \
+        throw PyNvVCException<PyNvVCUnsupported>::makePyNvVCException(errorStr, errorCode, __FUNCTION__, __FILE__, __LINE__); \
+    } while (0)
 
 /**
 * @brief Wrapper class around std::thread
@@ -594,6 +661,31 @@ template <class COLOR32>
 void YUV444ToColorPlanar(uint8_t *dpYUV444, int nPitch, uint8_t *dpBgrp, int nBgrpPitch, int nWidth, int nHeight, int iMatrix = 0);
 template <class COLOR32>
 void YUV444P16ToColorPlanar(uint8_t *dpYUV444, int nPitch, uint8_t *dpBgrp, int nBgrpPitch, int nWidth, int nHeight, int iMatrix = 4);
+
+template <class COLOR24>
+void Nv12ToColor24(uint8_t *dpNv12, int nNv12Pitch, uint8_t *dpBgra, int nBgraPitch, int nWidth, int nSurfaceHeight, int nHeight, int iMatrix = 0, CUstream stream = 0);
+template <class COLOR24>
+void Nv12ToColor24Planar(uint8_t *dpNv12, int nNv12Pitch, uint8_t *dpBgrp, int nBgrpPitch, int nWidth, int nHeight, int nDstHeight, int iMatrix = 0, CUstream stream = 0);
+template <class COLOR24>
+void P016ToColor24(uint8_t *dpP016, int nP016Pitch, uint8_t *dpBgra, int nBgraPitch, int nWidth, int nSurfaceHeight, int nHeight, int iMatrix = 4, CUstream stream = 0);
+template <class COLOR24>
+void P016ToColor24Planar(uint8_t *dpP016, int nP016Pitch, uint8_t *dpRGBP, int nRGBPPitch, int nWidth, int nHeight, int nDstHeight, int iMatrix = 4, CUstream stream = 0);
+template <class COLOR24>
+void YUV444ToColor24(uint8_t *dpYUV444, int nPitch, uint8_t *dpRGB, int nRGBPitch, int nWidth, int nSurfaceHeight, int nHeight, int iMatrix = 0, CUstream stream = 0);
+template <class COLOR24>
+void YUV444ToColor24Planar(uint8_t *dpYUV444, int nPitch, uint8_t *dpRGBP, int nRGBPPitch, int nWidth, int nHeight, int nDstHeight, int iMatrix = 0, CUstream stream = 0);
+template <class COLOR24>
+void YUV444P16ToColor24(uint8_t *dpYUV444, int nPitch, uint8_t *dpRGB, int nRGBPitch, int nWidth, int nSurfaceHeight, int nHeight, int iMatrix = 4, CUstream stream = 0);
+template <class COLOR24>
+void YUV444P16ToColor24Planar(uint8_t *dpYUV444, int nPitch, uint8_t *dpRGBP, int nRGBPPitch, int nWidth, int nHeight, int nDstHeight, int iMatrix = 4, CUstream stream = 0);
+template <class COLOR24>
+void Nv16ToColor24(uint8_t *dpNv16, int nNv16Pitch, uint8_t *dpBgra, int nBgraPitch, int nWidth, int nSurfaceHeight, int nHeight, int iMatrix = 0, CUstream stream = 0);
+template <class COLOR24>
+void Nv16ToColor24Planar(uint8_t *dpNv16, int nNv16Pitch, uint8_t *dpBgrp, int nBgrpPitch, int nWidth, int nHeight, int nDstHeight, int iMatrix = 0, CUstream stream = 0);
+template <class COLOR24>
+void P216ToColor24(uint8_t *dpP216, int nP216Pitch, uint8_t *dpBgra, int nBgraPitch, int nWidth, int nSurfaceHeight, int nHeight, int iMatrix = 4, CUstream stream = 0);
+template <class COLOR24>
+void P216ToColor24Planar(uint8_t *dpP216, int nP216Pitch, uint8_t *dpRGBP, int nRGBPPitch, int nWidth, int nHeight, int nDstHeight, int iMatrix = 4, CUstream stream = 0);
 
 void Bgra64ToP016(uint8_t *dpBgra, int nBgraPitch, uint8_t *dpP016, int nP016Pitch, int nWidth, int nHeight, int iMatrix = 4);
 

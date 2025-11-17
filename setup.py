@@ -1,6 +1,6 @@
 # This copyright notice applies to this file only
 #
-# SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: MIT
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
@@ -36,19 +36,17 @@ except VersionConflict:
     print("Error: version of setuptools is too old (<42)!")
     sys.exit(1)
 
-
 if __name__ == "__main__":
     import skbuild
 
     skbuild.setup(
         name="PyNvVideoCodec",
-        version="1.0.2",
-        description="PyNvVideoCodec is NVIDIA’s Python based video codec library for hardware accelerated video encode and decode on NVIDIA GPUs.",
+        version="2.0.2",
+        description="PyNvVideoCodec is NVIDIA's Python based video codec library for hardware accelerated video encode and decode on NVIDIA GPUs.",
         author="NVIDIA",
         license="MIT",
-        packages=["PyNvVideoCodec"],
-        package_data={"PyNvVideoCodec": ["__init__.pyi"]},
-        package_dir={"": "src"},
+        packages=["PyNvVideoCodec", "PyNvVideoCodec.decoders", "PyNvVideoCodec.transcoder", "samples", "benchmarks"],
+        package_dir={"": "src", "samples": "samples", "benchmarks": "benchmarks"},
         include_package_data=True,
         cmake_install_dir="src",
     )
