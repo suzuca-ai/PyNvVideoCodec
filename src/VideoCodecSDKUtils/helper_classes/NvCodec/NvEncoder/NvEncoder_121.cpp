@@ -635,7 +635,14 @@ NVENCSTATUS NvEncoder::DoEncode(NV_ENC_INPUT_PTR inputBuffer, NV_ENC_OUTPUT_PTR 
     }
     picParams.version = NV_ENC_PIC_PARAMS_VER;
     picParams.pictureStruct = NV_ENC_PIC_STRUCT_FRAME;
+
+    // [MEMO] To correctly match the picParams.inputTimeStamp with the outputTimeStamp, inputTimeStamp should not be overwritten here.
+#if 0
     picParams.inputTimeStamp = m_nInputTimeStamp++;
+#else
+    m_nInputTimeStamp++;
+#endif
+
     picParams.inputBuffer = inputBuffer;
     picParams.bufferFmt = GetPixelFormat();
     picParams.inputWidth = GetEncodeWidth();
