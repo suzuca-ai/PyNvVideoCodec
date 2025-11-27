@@ -26,18 +26,29 @@
 #message(STATUS "FFMPEG_DIR=$ENV{FFMPEG_DIR}")
 cmake_minimum_required(VERSION 3.20)
 
+# Find CUDA Toolkit first to get version information
+find_package(CUDAToolkit 11.2 REQUIRED)
+
 # This must be set before enabling CUDA. Otherwise it will be set to the default ARCH by nvcc (e.g. 52 by nvcc 11.7)
 if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-    # Define Turing / Ampere / Ada / Blackwell if not set by the user
+    # Define Turing / Ampere / Ada / Hopper architectures (always supported)
     set(CMAKE_CUDA_ARCHITECTURES
-        75
-        80
-        86
-        87
-        89
-        90
-        120
+        75  # Turing
+        80  # Ampere
+        86  # Ampere
+        87  # Volta variant
+        89  # Ada Lovelace
+        90  # Hopper
     )
+
+    # Add Blackwell (120) only for CUDA 12.8+
+    if(CUDAToolkit_VERSION_MAJOR GREATER 12 OR
+       (CUDAToolkit_VERSION_MAJOR EQUAL 12 AND CUDAToolkit_VERSION_MINOR GREATER_EQUAL 8))
+        list(APPEND CMAKE_CUDA_ARCHITECTURES 120)
+        message(STATUS "CUDA ${CUDAToolkit_VERSION}: Blackwell architecture (120) enabled")
+    else()
+        message(STATUS "CUDA ${CUDAToolkit_VERSION}: Blackwell architecture (120) disabled (requires CUDA 12.8+)")
+    endif()
 endif()
 
 project(VideoCodecSDKUtils LANGUAGES CXX CUDA)
@@ -81,7 +92,6 @@ if(WIN32)
     set(NV_FFMPEG_HDRS ${FFMPEG_DIR}/include)
 endif()
 
-find_package(CUDAToolkit 11.2 REQUIRED)
 include(GenerateExportHeader)
 
 set(CUDA_HOST_COMPILER ${CMAKE_CXX_COMPILER})
