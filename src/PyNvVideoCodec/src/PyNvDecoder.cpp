@@ -214,7 +214,7 @@ static CAPS PyNvDecoderCaps(
     CUdevice cuDevice = 0;
     CUcontext cudacontext;
     cuDeviceGet(&cuDevice, iGPU);
-#if CUDA_VERSION >= 12000
+#if CUDA_VERSION >= 13000
     CUctxCreateParams params{};
     cuCtxCreate(&cudacontext, &params, 0, cuDevice);
 #else

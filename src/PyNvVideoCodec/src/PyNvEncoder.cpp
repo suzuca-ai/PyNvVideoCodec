@@ -992,7 +992,7 @@ static CAPS PyNvEncoderCaps(
     CUcontext cudacontext;
     cuDeviceGet(&cuDevice, iGPU);
     ValidateGpuId(iGPU);
-#if CUDA_VERSION >= 12000
+#if CUDA_VERSION >= 13000
     CUctxCreateParams params{};
     cuCtxCreate(&cudacontext, &params, 0, cuDevice);
 #else
