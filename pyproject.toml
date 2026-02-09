@@ -1,6 +1,6 @@
 [build-system]        
 requires = [
-  "setuptools>=42",
+  "setuptools>=42,<82",
   "scikit-build",
   "numpy",
   "ninja; platform_system!='Windows'"
