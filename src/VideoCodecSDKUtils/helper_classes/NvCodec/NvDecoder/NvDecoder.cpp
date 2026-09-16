@@ -401,18 +401,7 @@ int NvDecoder::HandleVideoSequence(CUVIDEOFORMAT *pVideoFormat)
 
     CUDA_DRVAPI_CALL(cuCtxPushCurrent(m_cuContext));
     NVDEC_API_CALL(m_api.cuvidCreateDecoder(&m_hDecoder, &videoDecodeCreateInfo));
-    uint8_t* pFrame[8] = { NULL };
-    if (m_bUseDeviceFrame)
-    {
-        if (m_bEnableAsyncAllocations)
-        {
-            for (size_t i = 0; i < 8; i++)
-            {
-                CUDA_DRVAPI_CALL(cuMemAllocAsync((CUdeviceptr*)&pFrame[i], GetFrameSize(), m_cuvidStream));
-            }
-        }
-    }
-    else
+    if (!m_bUseDeviceFrame)
     {
         CUDA_DRVAPI_CALL(cuMemAlloc((CUdeviceptr *)&m_dpScratchFrame, GetOutputFrameSize()));
     }
@@ -528,29 +517,8 @@ int NvDecoder::ReconfigureDecoder(CUVIDEOFORMAT *pVideoFormat)
     CUDA_DRVAPI_CALL(cuCtxPushCurrent(m_cuContext));
     NVDEC_API_CALL(m_api.cuvidReconfigureDecoder(m_hDecoder, &reconfigParams));
     
-    //deallocate earlier buffers
-    for (uint8_t* pFrame : m_vpFrame)
-    {
-        if (m_bUseDeviceFrame)
-        {
-            if (m_bEnableAsyncAllocations)
-            {
-                CUDA_DRVAPI_CALL(cuMemFreeAsync((*(CUdeviceptr*)&pFrame), NULL));//sync on NULL stream to ensure that all work is completed before dtor
-            }
-        }
-    }
-    //recreate new buffers
-    uint8_t* pFrame[8] = { NULL };
-    if (m_bUseDeviceFrame)
-        {
-            if (m_bEnableAsyncAllocations)
-            {
-                for (size_t i = 0; i < 8; i++)
-                {
-                    CUDA_DRVAPI_CALL(cuMemAllocAsync((CUdeviceptr*)&pFrame[i], GetFrameSize(), m_cuvidStream));
-                }
-            }
-        }
+    // Output buffers are kept: the reconfigured decoder keeps the initial surface size,
+    // and frames already returned from the current Decode() call still point at them.
     CUDA_DRVAPI_CALL(cuCtxPopCurrent(NULL));
     STOP_TIMER("Session Reconfigure Time: ");
 
