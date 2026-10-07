@@ -120,7 +120,8 @@ static void RunDecoder(DecoderCommon* decoderCommon, FFmpegDemuxer* demuxer, NvD
             int64_t timestamp = 0;
             SEI_MESSAGE seims;
             CUevent event = nullptr;
-            CUdeviceptr dpFrame = (CUdeviceptr)decoder->GetLockedFrame(&timestamp, &seims, &event);
+            FrameColorInfo colorInfo;
+            CUdeviceptr dpFrame = (CUdeviceptr)decoder->GetLockedFrame(&timestamp, &seims, &event, &colorInfo);
             if (dpFrame) {
                 // Use frame counter based on key frame index instead of dts_to_frame_number
                 int frameNumber = currentFrameIndex;
@@ -129,7 +130,7 @@ static void RunDecoder(DecoderCommon* decoderCommon, FFmpegDemuxer* demuxer, NvD
                 // Check if this frame should be kept or discarded
                 if (frameNumber >= startFrame) {
                     LOG(DEBUG) << "Keeping frame: " << frameNumber;
-                    DecodedFrame decodedFrame = GetCAIMemoryViewAndDLPack(decoder, std::make_tuple(dpFrame, timestamp, seims, event));
+                    DecodedFrame decodedFrame = GetCAIMemoryViewAndDLPack(decoder, std::make_tuple(dpFrame, timestamp, seims, event, colorInfo));
                     decodedFrames.PushEntry(decodedFrame);
                 } else {
                     LOG(DEBUG) << "Discarding frame: " << frameNumber;

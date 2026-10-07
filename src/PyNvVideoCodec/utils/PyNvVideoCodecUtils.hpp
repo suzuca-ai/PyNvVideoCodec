@@ -114,7 +114,7 @@ inline Pixel_Format GetPixelFormat(const NvDecoder* decoder, const OutputColorTy
     }
 }
 
-inline DecodedFrame GetCAIMemoryViewAndDLPack(const NvDecoder* decoder, std::tuple<CUdeviceptr, int64_t, SEI_MESSAGE, CUevent> tup)
+inline DecodedFrame GetCAIMemoryViewAndDLPack(const NvDecoder* decoder, std::tuple<CUdeviceptr, int64_t, SEI_MESSAGE, CUevent, FrameColorInfo> tup)
 {
     DecodedFrame frame;
 
@@ -126,6 +126,8 @@ inline DecodedFrame GetCAIMemoryViewAndDLPack(const NvDecoder* decoder, std::tup
 	frame.seiMessage = std::get<2>(tup);
     frame.decoderStreamEvent = reinterpret_cast<size_t>(std::get<3>(tup));
     frame.decoderStream = reinterpret_cast<size_t>(decoder->GetStream());
+    frame.matrixCoefficients = std::get<4>(tup).matrix_coefficients;
+    frame.videoFullRangeFlag = std::get<4>(tup).video_full_range_flag;
     switch (frame.format)
     {
         case Pixel_Format_NV12:
