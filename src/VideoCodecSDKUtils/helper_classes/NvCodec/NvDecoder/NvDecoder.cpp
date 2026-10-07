@@ -425,6 +425,9 @@ int NvDecoder::ReconfigureDecoder(CUVIDEOFORMAT *pVideoFormat)
         PYNVVC_THROW_ERROR("Reconfigure Not supported for chroma format change", CUDA_ERROR_NOT_SUPPORTED);
     }
 
+    // VUI may change without any resolution change or decoder reconfiguration.
+    m_videoFormat.video_signal_description = pVideoFormat->video_signal_description;
+
     bool bDecodeResChange = !(pVideoFormat->coded_width == m_videoFormat.coded_width && pVideoFormat->coded_height == m_videoFormat.coded_height);
     bool bDisplayRectChange = !(pVideoFormat->display_area.bottom == m_videoFormat.display_area.bottom && pVideoFormat->display_area.top == m_videoFormat.display_area.top \
         && pVideoFormat->display_area.left == m_videoFormat.display_area.left && pVideoFormat->display_area.right == m_videoFormat.display_area.right);
@@ -526,18 +529,19 @@ int NvDecoder::ReconfigureDecoder(CUVIDEOFORMAT *pVideoFormat)
 }
 
 
-std::vector<std::tuple<CUdeviceptr, int64_t, SEI_MESSAGE, CUevent>> NvDecoder::PyDecode(uint8_t* bsl_data, uint64_t bsl, int64_t pts, int32_t decode_flag)
+std::vector<std::tuple<CUdeviceptr, int64_t, SEI_MESSAGE, CUevent, FrameColorInfo>> NvDecoder::PyDecode(uint8_t* bsl_data, uint64_t bsl, int64_t pts, int32_t decode_flag)
 {
     int  numFrames = this->Decode(bsl_data,bsl, decode_flag,pts);
-    std::vector<std::tuple<CUdeviceptr, int64_t, SEI_MESSAGE, CUevent>> frames;
+    std::vector<std::tuple<CUdeviceptr, int64_t, SEI_MESSAGE, CUevent, FrameColorInfo>> frames;
     for (int i = 0; i < numFrames; i++)
     {
         int64_t timestamp = 0;
         SEI_MESSAGE seiMessage;
         CUevent event = nullptr;
-        CUdeviceptr  data = (CUdeviceptr)this->GetFrame(&timestamp, &seiMessage, &event);
+        FrameColorInfo colorInfo;
+        CUdeviceptr  data = (CUdeviceptr)this->GetFrame(&timestamp, &seiMessage, &event, &colorInfo);
         auto outputFormat = this->GetOutputFormat();
-        std::tuple<CUdeviceptr, int64_t, SEI_MESSAGE, CUevent> frame(data, timestamp, seiMessage, event);
+        std::tuple<CUdeviceptr, int64_t, SEI_MESSAGE, CUevent, FrameColorInfo> frame(data, timestamp, seiMessage, event, colorInfo);
          
         switch (outputFormat)
         {
@@ -745,6 +749,10 @@ int NvDecoder::HandlePictureDecode(CUVIDPICPARAMS *pPicParams) {
         PYNVVC_THROW_ERROR("Decoder not initialized.", CUDA_ERROR_NOT_INITIALIZED);
         return false;
     }
+    // A newer sequence can arrive before this picture's display callback.
+    const auto& signal = m_videoFormat.video_signal_description;
+    m_pictureColorInfo[pPicParams->CurrPicIdx] = {
+        signal.matrix_coefficients, signal.video_full_range_flag != 0};
     m_nPicNumInDecodeOrder[pPicParams->CurrPicIdx] = m_nDecodePicCnt++;
     CUDA_DRVAPI_CALL(cuCtxPushCurrent(m_cuContext));
     NVDEC_API_CALL(m_api.cuvidDecodePicture(m_hDecoder, pPicParams));
@@ -825,6 +833,9 @@ int NvDecoder::HandlePictureDisplay(CUVIDPARSERDISPINFO *pDispInfo) {
             m_DecodedFrameEvent.push_back(event);
         }
         pDecodedFrame = m_vpFrame[m_nDecodedFrame - 1];
+        if (m_vColorInfo.size() < m_vpFrame.size())
+            m_vColorInfo.resize(m_vpFrame.size());
+        m_vColorInfo[m_nDecodedFrame - 1] = m_pictureColorInfo[pDispInfo->picture_index];
     }
     
     if (m_nSeekPts == 0 || pDispInfo->timestamp >= m_nSeekPts)
@@ -1190,7 +1201,7 @@ int NvDecoder::Decode(const uint8_t *pData, int nSize, int nFlags, int64_t nTime
     return m_nDecodedFrame;
 }
 
-uint8_t* NvDecoder::GetFrame(int64_t* pTimestamp, SEI_MESSAGE *pSEIMessage, CUevent* decoderFrameEvent)
+uint8_t* NvDecoder::GetFrame(int64_t* pTimestamp, SEI_MESSAGE *pSEIMessage, CUevent* decoderFrameEvent, FrameColorInfo* pColorInfo)
 {
     if (m_nDecodedFrame > 0)
     {
@@ -1204,13 +1215,15 @@ uint8_t* NvDecoder::GetFrame(int64_t* pTimestamp, SEI_MESSAGE *pSEIMessage, CUev
         {
             *decoderFrameEvent = m_DecodedFrameEvent[m_nDecodedFrameReturned];
         }
+        if (pColorInfo)
+            *pColorInfo = m_vColorInfo[m_nDecodedFrameReturned];
         return m_vpFrame[m_nDecodedFrameReturned++];
     }
 
     return NULL;
 }
 
-uint8_t* NvDecoder::GetLockedFrame(int64_t* pTimestamp, SEI_MESSAGE *pSEIMessage, CUevent* decoderFrameEvent)
+uint8_t* NvDecoder::GetLockedFrame(int64_t* pTimestamp, SEI_MESSAGE *pSEIMessage, CUevent* decoderFrameEvent, FrameColorInfo* pColorInfo)
 {
     uint8_t *pFrame;
     uint64_t timestamp;
@@ -1235,6 +1248,10 @@ uint8_t* NvDecoder::GetLockedFrame(int64_t* pTimestamp, SEI_MESSAGE *pSEIMessage
         
         if (pTimestamp)
             *pTimestamp = timestamp;
+
+        if (pColorInfo)
+            *pColorInfo = m_vColorInfo[0];
+        m_vColorInfo.erase(m_vColorInfo.begin());
 
         // sei message related
         if (m_bExtractSEIMessage && pSEIMessage)

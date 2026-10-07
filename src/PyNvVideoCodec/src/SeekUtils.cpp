@@ -295,16 +295,17 @@ DecodedFrame SeekUtils::GetFrame(bool bLockFrame)
     CUdeviceptr tupData = 0;
     SEI_MESSAGE seimsg;
     CUevent event = nullptr;
+    FrameColorInfo colorInfo;
     if (bLockFrame)
     {
-       tupData = (CUdeviceptr)mDecoder->GetLockedFrame(&tupTimestamp, &seimsg, &event);
+       tupData = (CUdeviceptr)mDecoder->GetLockedFrame(&tupTimestamp, &seimsg, &event, &colorInfo);
     }
     else
     {
-        tupData = (CUdeviceptr)mDecoder->GetFrame(&tupTimestamp, &seimsg, &event);
+        tupData = (CUdeviceptr)mDecoder->GetFrame(&tupTimestamp, &seimsg, &event, &colorInfo);
     }
 
-    return GetCAIMemoryViewAndDLPack(mDecoder, std::make_tuple(tupData, tupTimestamp, seimsg, event));
+    return GetCAIMemoryViewAndDLPack(mDecoder, std::make_tuple(tupData, tupTimestamp, seimsg, event, colorInfo));
 }
 
 int SeekUtils::GetKeyNearestKeyFrameIndexForTarget(AVStream* stream,

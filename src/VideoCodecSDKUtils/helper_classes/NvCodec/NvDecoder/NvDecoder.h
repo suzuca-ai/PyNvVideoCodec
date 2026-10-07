@@ -89,6 +89,12 @@ struct Dim {
     int w, h;
 };
 
+// Raw input bitstream color description, captured before display reordering.
+struct FrameColorInfo {
+    uint8_t matrix_coefficients = 2; // CICP unspecified; preserve all explicit values.
+    bool video_full_range_flag = false;
+};
+
 /**
 * @brief Enums for User requested output formats
 */
@@ -333,7 +339,7 @@ public:
     *   @brief  This function returns a decoded frame and timestamp. This function should be called in a loop for
     *   fetching all the frames that are available for display.
     */
-    uint8_t* GetFrame(int64_t* pTimestamp = nullptr, SEI_MESSAGE *pSEIMessage = nullptr, CUevent* decoderFrameEvent = nullptr);
+    uint8_t* GetFrame(int64_t* pTimestamp = nullptr, SEI_MESSAGE *pSEIMessage = nullptr, CUevent* decoderFrameEvent = nullptr, FrameColorInfo* pColorInfo = nullptr);
 
 
     /**
@@ -342,7 +348,7 @@ public:
     *   getting overwritten, even if subsequent decode calls are made. The frame buffers
     *   remain locked, until UnlockFrame() is called
     */
-    uint8_t* GetLockedFrame(int64_t* pTimestamp = nullptr, SEI_MESSAGE *pSEIMessage = nullptr, CUevent* decoderFrameEvent = nullptr);
+    uint8_t* GetLockedFrame(int64_t* pTimestamp = nullptr, SEI_MESSAGE *pSEIMessage = nullptr, CUevent* decoderFrameEvent = nullptr, FrameColorInfo* pColorInfo = nullptr);
 
     /**
     *   @brief  This function unlocks the frame buffer and makes the frame buffers available for write again
@@ -395,7 +401,7 @@ public:
     *   @param  bitstream_data - pointer to the elementary bitstream data for that frame
     *   @param  bitstream_data_len - length of bitstream data
     */
-    std::vector<std::tuple<CUdeviceptr, int64_t, SEI_MESSAGE, CUevent>> PyDecode(uint8_t*, uint64_t, int64_t pts, int32_t decode_flag);
+    std::vector<std::tuple<CUdeviceptr, int64_t, SEI_MESSAGE, CUevent, FrameColorInfo>> PyDecode(uint8_t*, uint64_t, int64_t pts, int32_t decode_flag);
 
     /**
     *   @brief  This function sets pts of seeked frame. decode can skip reading frames having pts < seek frame pts
@@ -519,6 +525,9 @@ private:
     std::vector<CUevent> m_DecodedFrameEvent;
     // timestamps of decoded frames
     std::vector<int64_t> m_vTimestamp;
+    // Color descriptions follow the same output slots as frames and timestamps.
+    std::vector<FrameColorInfo> m_vColorInfo;
+    FrameColorInfo m_pictureColorInfo[MAX_FRM_CNT];
     // collection of locked frames
     std::deque<uint8_t*> m_LockedFrames;
     // collection of locked events

@@ -165,8 +165,9 @@ DecodedFrame PyNvDecoder::GetFrame()
     int64_t timestamp;
     SEI_MESSAGE seimsg;
     CUevent event = nullptr;
-    CUdeviceptr  data = (CUdeviceptr)decoder->GetFrame(&timestamp, &seimsg, &event);
-    return GetCAIMemoryViewAndDLPack(decoder.get(), std::make_tuple(data, timestamp, seimsg, event));
+    FrameColorInfo colorInfo;
+    CUdeviceptr  data = (CUdeviceptr)decoder->GetFrame(&timestamp, &seimsg, &event, &colorInfo);
+    return GetCAIMemoryViewAndDLPack(decoder.get(), std::make_tuple(data, timestamp, seimsg, event, colorInfo));
 }
 
 using CAPS = std::unordered_map<std::string, uint32_t>;
@@ -427,6 +428,10 @@ void Init_PyNvDecoder(py::module& m)
     py::class_<DecodedFrame, std::shared_ptr<DecodedFrame>>(m, "DecodedFrame")
         .def_readonly("timestamp", &DecodedFrame::timestamp)
         .def_readonly("format", &DecodedFrame::format)
+        .def_readonly("matrix_coefficients", &DecodedFrame::matrixCoefficients,
+            "Input bitstream CICP matrix coefficient code (2 means unspecified).")
+        .def_readonly("video_full_range_flag", &DecodedFrame::videoFullRangeFlag,
+            "Input bitstream full-range flag; false when unspecified.")
         .def_readonly("decoder_stream_event", &DecodedFrame::decoderStreamEvent)
         .def("__repr__",
             [](std::shared_ptr<DecodedFrame>& self)

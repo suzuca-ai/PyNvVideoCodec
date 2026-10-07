@@ -142,6 +142,8 @@ struct CAIMemoryView
 struct DecodedFrame
 {
     int64_t timestamp;
+    uint8_t matrixCoefficients = 2;
+    bool videoFullRangeFlag = false;
     std::vector<CAIMemoryView> views;
     Pixel_Format format;
     std::shared_ptr<ExternalBuffer> extBuf;
