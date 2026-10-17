@@ -68,11 +68,18 @@ static std::vector<uint8_t> sps(int top, int bottom = -2, bool complex = false, 
         if (complex) { w.put(5, 3); w.put(0); w.put(1); w.put(1, 8); w.put(1, 8); w.put(1, 8); }
         w.put(top >= 0);
         if (top >= 0) { w.ue(top); w.ue(bottom == -2 ? top : bottom); }
+        w.put(0, 6); // remaining VUI flags, including absent timing/restrictions
     }
+    w.put(0); // sps_extension_present_flag
     return w.nal(33);
 }
 
-static std::vector<uint8_t> pps(unsigned source = 0) { Writer w; w.ue(0); w.ue(source); return w.nal(34); }
+static std::vector<uint8_t> pps(unsigned source = 0) {
+    Writer w; w.ue(0); w.ue(source); w.put(0, 7);
+    w.ue(0); w.ue(0); w.ue(0); w.put(0, 3);
+    w.ue(0); w.ue(0); w.put(0, 10); w.ue(0); w.put(0, 2);
+    return w.nal(34);
+}
 static std::vector<uint8_t> slice(unsigned id, bool first = true) {
     Writer w; w.put(first); w.ue(0); w.put(id, 16); return w.nal(1);
 }
@@ -97,6 +104,19 @@ static void unitTests() {
     auto bad = sps(2); bad.resize(bad.size() - 3);
     parse(sps(4)); parse(pps()); parse(bad); assert(parse(slice(1)) == 0);
     parse(sps(4)); parse(pps()); parse(pps(16)); assert(parse(slice(1)) == 0);
+    // Reject replacements damaged after chroma_loc_info, not just its prefix.
+    for (size_t cut = 1; cut <= 8; ++cut) {
+        auto truncated = sps(4); truncated.resize(truncated.size() - cut);
+        parse(sps(2)); parse(pps()); parse(truncated); assert(parse(slice(1)) == 0);
+    }
+    auto trailing = sps(4); trailing.back() ^= 1;
+    parse(sps(2)); parse(pps()); parse(trailing); assert(parse(slice(1)) == 0);
+    auto large = sps(4); large.resize(65540, 0x55);
+    parse(sps(2)); parse(pps()); parse(large); assert(parse(slice(1)) == 0);
+    auto shortPps = pps(); shortPps.pop_back();
+    parse(sps(2)); parse(pps()); parse(shortPps); assert(parse(slice(1)) == 0);
+    parse(pps()); assert(parse(slice(1)) == 3);
+
     parse(sps(2, -2, false, true)); parse(pps()); assert(parse(slice(1)) == 0);
     // Deterministic malformed NALs exercise the readers under ASan/UBSan.
     uint32_t random = 1;

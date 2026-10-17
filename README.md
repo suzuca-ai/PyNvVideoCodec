@@ -48,6 +48,8 @@ own policy for unspecified or unsupported matrix codes.
 6 = bottom. It follows each picture through display reordering. An absent
 HEVC chroma-location field is inferred as left only after parsing the SPS;
 other codecs, unsupported locations, and unparsed input remain unknown.
+SPS/PPS metadata is accepted only after the existing FFmpeg `hevc_metadata`
+filter validates the complete parameter set, including its termination.
 This metadata does not resample pixels. Raw HEVC input must use Annex B.
 HEVC access units are framed by the existing FFmpeg dependency before NVDEC
 submission; an access unit larger than 64 MiB is rejected.

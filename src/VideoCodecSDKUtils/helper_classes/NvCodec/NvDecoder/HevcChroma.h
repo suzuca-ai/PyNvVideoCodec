@@ -7,6 +7,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <vector>
+extern "C" {
+#include <libavcodec/bsf.h>
+}
 
 // HEVC Annex B metadata only. Values match AVChromaLocation: unknown=0,
 // left=1, center=2, top-left=3, top=4, bottom-left=5, bottom=6.
@@ -52,6 +55,32 @@ class HevcChroma {
     std::array<uint8_t, 16> sps{};
     std::array<int, 64> pps;
     std::vector<uint8_t> nal;
+    AVBSFContext* validator = nullptr;
+    bool oversized = false;
+
+    bool validParameterSet() {
+        if (oversized) return false;
+        if (!validator) {
+            const auto* filter = av_bsf_get_by_name("hevc_metadata");
+            if (!filter || av_bsf_alloc(filter, &validator) < 0) return false;
+            validator->par_in->codec_id = AV_CODEC_ID_HEVC;
+            validator->par_in->codec_type = AVMEDIA_TYPE_VIDEO;
+            if (av_bsf_init(validator) < 0) { av_bsf_free(&validator); return false; }
+        }
+        AVPacket* packet = av_packet_alloc();
+        if (!packet) return false;
+        bool valid = false;
+        if (av_new_packet(packet, static_cast<int>(nal.size() + 3)) >= 0) {
+            packet->data[0] = packet->data[1] = 0; packet->data[2] = 1;
+            std::copy(nal.begin(), nal.end(), packet->data + 3);
+            // CBS validates the complete SPS/PPS, including extensions and
+            // RBSP termination. Never validate or copy picture data here.
+            valid = av_bsf_send_packet(validator, packet) >= 0 &&
+                    av_bsf_receive_packet(validator, packet) >= 0;
+        }
+        av_packet_free(&packet);
+        return valid;
+    }
 
     void readParameterSet() {
         if (nal.size() < 3 || (nal[0] & 0x81) || (nal[1] & 0xf8) || !(nal[1] & 7)) return;
@@ -63,7 +92,7 @@ class HevcChroma {
             if (!b.valid) return;
             pps[id] = -1;
             const auto source = b.ue(15);
-            if (b.valid) pps[id] = static_cast<int>(source);
+            if (b.valid && validParameterSet()) pps[id] = static_cast<int>(source);
             return;
         }
         b.skip(4);
@@ -80,6 +109,7 @@ class HevcChroma {
         const auto id = b.ue(15);
         if (!b.valid || layers > 6) return;
         sps[id] = 0; // A malformed replacement must not inherit the previous VUI.
+        if (!validParameterSet()) return;
         const auto chroma = b.ue(3);
         if (chroma == 3) b.skip(1);
         b.ue(); b.ue();
@@ -151,7 +181,10 @@ class HevcChroma {
 
 public:
     HevcChroma() { pps.fill(-1); }
-    void reset() { sps.fill(0); pps.fill(-1); nal.clear(); }
+    HevcChroma(const HevcChroma&) = delete;
+    HevcChroma& operator=(const HevcChroma&) = delete;
+    ~HevcChroma() { av_bsf_free(&validator); }
+    void reset() { sps.fill(0); pps.fill(-1); nal.clear(); oversized = false; av_bsf_free(&validator); }
 
     // One complete Annex B access unit, dispatched synchronously to NVDEC.
     // Only SPS/PPS and a small slice header are retained; never queue pictures.
@@ -163,7 +196,7 @@ public:
             readParameterSet();
             if (!nal.empty() && ((nal[0] >> 1) & 63) <= 31 && nal.size() >= 3 && (nal[2] & 128))
                 location = pictureLocation();
-            nal.clear();
+            nal.clear(); oversized = false;
         };
         for (size_t i = 0; i < size; ++i) {
             const auto byte = data[i];
@@ -173,6 +206,7 @@ public:
                 const size_t limit = nal.size() >= 2 && ((nal[0] >> 1) & 63) <= 31 ? 32 : 65536;
                 while (zeros && nal.size() < limit) { nal.push_back(0); --zeros; }
                 if (nal.size() < limit) nal.push_back(byte);
+                else if (limit == 65536) oversized = true;
             }
             zeros = 0;
         }
