@@ -70,7 +70,7 @@ static std::vector<uint8_t> sps(int top, int bottom = -2, bool complex = false) 
     return w.nal(33);
 }
 
-static std::vector<uint8_t> pps() { Writer w; w.ue(0); w.ue(0); return w.nal(34); }
+static std::vector<uint8_t> pps(unsigned source = 0) { Writer w; w.ue(0); w.ue(source); return w.nal(34); }
 static std::vector<uint8_t> slice(unsigned id, bool first = true) {
     Writer w; w.put(first); w.ue(0); w.put(id, 16); return w.nal(1);
 }
@@ -120,6 +120,12 @@ static void unitTests() {
     parser.feed(good.data(), good.size(), true);
     auto parameters = pps(); parser.feed(parameters.data(), parameters.size(), true);
     parser.feed(bad.data(), bad.size(), true);
+    parser.feed(frame.data(), frame.size(), true);
+    assert(parser.take(frame.data(), frame.size()) == 0);
+    parser.feed(good.data(), good.size(), true);
+    parser.feed(parameters.data(), parameters.size(), true);
+    auto badPps = pps(16);
+    parser.feed(badPps.data(), badPps.size(), true);
     parser.feed(frame.data(), frame.size(), true);
     assert(parser.take(frame.data(), frame.size()) == 0);
     // Deterministic malformed NALs exercise the readers under ASan/UBSan.

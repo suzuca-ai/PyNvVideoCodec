@@ -70,7 +70,10 @@ class HevcChroma {
         if (type != 33 && type != 34) return;
         Bits b(nal);
         if (type == 34) {
-            const auto id = b.ue(63), source = b.ue(15);
+            const auto id = b.ue(63);
+            if (!b.valid) return;
+            pps[id] = -1;
+            const auto source = b.ue(15);
             if (b.valid) pps[id] = static_cast<int>(source);
             return;
         }
