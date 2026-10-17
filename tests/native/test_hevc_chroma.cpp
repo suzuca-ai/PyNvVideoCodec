@@ -152,21 +152,38 @@ int main(int argc, char** argv) {
         HevcAccessUnits splitter;
         splitter.feed(stream.data(), stream.size(), 0, true,
             [&](const uint8_t* data, int size, int64_t) { frames.emplace_back(data, data + size); });
-        for (int mode : {0, 1, 2}) {
+        for (bool separateHeaders : {false, true}) for (size_t prefix : {size_t{0}, size_t{1}, size_t{2}, size_t{3}, size_t{4}, size_t{5}, size_t{6}, size_t{7}}) {
             HevcAccessUnits units;
             std::vector<int64_t> times;
             auto consume = [&](const uint8_t*, int, int64_t pts) { times.push_back(pts); };
             for (size_t i = 0; i < frames.size(); ++i) {
                 const auto& frame = frames[i];
-                const auto prefix = mode == 1 ? std::min(size_t{7}, frame.size()) : frame.size();
-                units.feed(frame.data(), prefix, 1000 + i, mode == 2, consume);
-                if (prefix < frame.size())
-                    units.feed(frame.data() + prefix, frame.size() - prefix, AV_NOPTS_VALUE, false, consume);
+                size_t start = 0;
+                if (separateHeaders) {
+                    for (size_t j = 0; j + 5 < frame.size(); ++j) {
+                        if (!frame[j] && !frame[j + 1] && frame[j + 2] == 1 && ((frame[j + 3] >> 1) & 63) <= 31) {
+                            start = j && !frame[j - 1] ? j - 1 : j;
+                            break;
+                        }
+                    }
+                    if (start) units.feed(frame.data(), start, 0, false, consume);
+                }
+                const auto count = prefix ? std::min(prefix, frame.size() - start) : frame.size() - start;
+                units.feed(frame.data() + start, count, 1000 + i, !prefix, consume);
+                if (start + count < frame.size())
+                    units.feed(frame.data() + start + count, frame.size() - start - count, AV_NOPTS_VALUE, false, consume);
             }
             units.feed(nullptr, 0, AV_NOPTS_VALUE, true, consume);
             assert(times.size() == frames.size());
-            for (size_t i = 0; i < times.size(); ++i) assert(times[i] == 1000 + static_cast<int64_t>(i));
+            for (size_t i = 0; i < times.size(); ++i)
+                assert(times[i] == 1000 + static_cast<int64_t>(i));
         }
+        HevcAccessUnits batch;
+        size_t index = 0;
+        batch.feed(stream.data(), stream.size(), 1234, true, [&](const uint8_t*, int, int64_t pts) {
+            assert(pts == (index++ ? AV_NOPTS_VALUE : 1234));
+        });
+        assert(index == frames.size());
         for (auto value : expected) std::cout << unsigned(value) << '\n';
     }
 }

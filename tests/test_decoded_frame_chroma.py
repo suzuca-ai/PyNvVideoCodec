@@ -3,6 +3,7 @@
 """HEVC per-picture chroma regression; requires FFmpeg/libx265 and NVDEC."""
 
 import ctypes
+import re
 import shutil
 import subprocess
 import tempfile
@@ -82,27 +83,42 @@ class DecodedFrameChromaTest(unittest.TestCase):
                 "ffmpeg", "-hide_banner", "-loglevel", "error", "-fflags", "+genpts",
                 "-i", str(raw), "-c", "copy", str(video),
             ], check=True, capture_output=True)
-            for fragmented, end_picture in ((False, False), (True, False), (False, True)):
-                with self.subTest(fragmented=fragmented, end_picture=end_picture):
-                    decoder = self.nvc.CreateDecoder(gpuid=0, codec=self.nvc.cudaVideoCodec.HEVC,
-                        cudacontext=0, cudastream=0, usedevicememory=True)
-                    expected, actual = [], []
-                    for packet in self.nvc.CreateDemuxer(filename=str(video)):
-                        if packet.bsl:
-                            expected.append(packet.pts)
-                        data = ctypes.string_at(packet.bsl_data, packet.bsl) if packet.bsl else b""
-                        chunks = [data[:7], data[7:]] if fragmented and data else [data]
-                        for index, chunk in enumerate(chunks):
-                            storage = ctypes.create_string_buffer(chunk) if chunk else None
-                            item = self.nvc.PacketData()
-                            item.bsl_data = ctypes.addressof(storage) if storage else 0
-                            item.bsl = len(chunk)
-                            item.pts = packet.pts if index == 0 else -9223372036854775808
-                            if end_picture and chunk:
-                                item.decode_flag = self.nvc.VideoPacketFlag.ENDOFPICTURE
-                            actual.extend(frame.timestamp for frame in decoder.Decode(item))
-                    actual.extend(frame.timestamp for frame in decoder.Decode(self.nvc.PacketData()))
-                    self.assertEqual(actual, sorted(expected))
+            for separate_headers in (False, True):
+                for fragmented, end_picture in ((False, False), (True, False), (False, True)):
+                    with self.subTest(headers=separate_headers, fragmented=fragmented, end_picture=end_picture):
+                        decoder = self.nvc.CreateDecoder(gpuid=0, codec=self.nvc.cudaVideoCodec.HEVC,
+                            cudacontext=0, cudastream=0, usedevicememory=True)
+                        expected, actual = [], []
+                        for packet in self.nvc.CreateDemuxer(filename=str(video)):
+                            if packet.bsl:
+                                expected.append(packet.pts)
+                            data = ctypes.string_at(packet.bsl_data, packet.bsl) if packet.bsl else b""
+                            if separate_headers and data:
+                                starts = [m.start() for m in re.finditer(b"\x00\x00(?:\x00)?\x01", data)]
+                                starts.append(len(data))
+                                first_vcl = next(start for start in starts[:-1]
+                                    if ((data[start:].lstrip(b"\x00")[1] >> 1) & 63) <= 31)
+                                # HERC sends VPS/SPS/PPS separately with token zero.
+                                for start, stop in zip(starts, starts[1:]):
+                                    if start >= first_vcl:
+                                        break
+                                    header = ctypes.create_string_buffer(data[start:stop])
+                                    item = self.nvc.PacketData()
+                                    item.bsl_data, item.bsl, item.pts = ctypes.addressof(header), stop - start, 0
+                                    actual.extend(frame.timestamp for frame in decoder.Decode(item))
+                                data = data[first_vcl:]
+                            chunks = [data[:7], data[7:]] if fragmented and data else [data]
+                            for index, chunk in enumerate(chunks):
+                                storage = ctypes.create_string_buffer(chunk) if chunk else None
+                                item = self.nvc.PacketData()
+                                item.bsl_data = ctypes.addressof(storage) if storage else 0
+                                item.bsl = len(chunk)
+                                item.pts = packet.pts if index == 0 else -9223372036854775808
+                                if end_picture and chunk:
+                                    item.decode_flag = self.nvc.VideoPacketFlag.ENDOFPICTURE
+                                actual.extend(frame.timestamp for frame in decoder.Decode(item))
+                        actual.extend(frame.timestamp for frame in decoder.Decode(self.nvc.PacketData()))
+                        self.assertEqual(actual, sorted(expected))
 
     def test_discontinuity(self):
         nvc = self.nvc

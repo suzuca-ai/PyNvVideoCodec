@@ -3,6 +3,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <stdexcept>
 #include <vector>
@@ -10,14 +11,39 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 }
 
-// Reuse FFmpeg's framing and PTS tracking; metadata is not exposed by its parser.
+// Reuse FFmpeg framing; match timestamps to the first VCL, not preceding SPS/PPS.
 class HevcAccessUnits {
     AVCodecParserContext* parser = nullptr;
     AVCodecContext* codec = nullptr;
     size_t pending = 0;
+    uint64_t header = 0;
+    std::array<int64_t, 7> headerPts{};
+    unsigned head = 0;
+    bool pictureSeen = false;
+    int64_t picturePts = AV_NOPTS_VALUE, leadingPts = AV_NOPTS_VALUE;
+
+    void track(const uint8_t* data, size_t size, int64_t pts, bool& used) {
+        for (size_t i = 0; i < size; ++i) {
+            header = (header << 8) | data[i];
+            headerPts[head] = used ? AV_NOPTS_VALUE : pts;
+            if (!used && leadingPts == AV_NOPTS_VALUE) leadingPts = pts;
+            head = (head + 1) % headerPts.size();
+            if (((header >> 24) & 0xffffff) != 1 || ((header >> 17) & 63) > 31 || !(header & 128))
+                continue;
+            if (!pictureSeen) {
+                pictureSeen = true;
+                const unsigned bytes = ((header >> 48) & 255) ? 6 : 7;
+                for (unsigned j = headerPts.size() - bytes; j < headerPts.size(); ++j) {
+                    const auto index = (head + j) % headerPts.size();
+                    if (headerPts[index] != AV_NOPTS_VALUE) picturePts = headerPts[index];
+                }
+            }
+            used = true; // One input packet timestamps only its first picture.
+        }
+    }
     static constexpr size_t maxAccessUnit = 64 * 1024 * 1024;
 public:
-    HevcAccessUnits() = default;
+    HevcAccessUnits() { headerPts.fill(AV_NOPTS_VALUE); }
     HevcAccessUnits(const HevcAccessUnits&) = delete;
     HevcAccessUnits& operator=(const HevcAccessUnits&) = delete;
     ~HevcAccessUnits() { reset(); }
@@ -26,6 +52,10 @@ public:
         parser = nullptr;
         avcodec_free_context(&codec);
         pending = 0;
+        header = 0; head = 0;
+        headerPts.fill(AV_NOPTS_VALUE);
+        pictureSeen = false;
+        picturePts = leadingPts = AV_NOPTS_VALUE;
     }
     // emit() must consume the borrowed access unit before it returns.
     template<class Emit>
@@ -36,6 +66,7 @@ public:
             if (!parser || !codec) { reset(); throw std::runtime_error("Cannot initialize HEVC access-unit parser"); }
             codec->codec_id = AV_CODEC_ID_HEVC;
         }
+        bool timestampUsed = false;
         std::vector<uint8_t> padded;
         while (size || flush) {
             const size_t count = std::min(size, size_t{65536});
@@ -48,8 +79,7 @@ public:
                 int outputSize = 0;
                 const int consumed = av_parser_parse2(parser, codec, &output, &outputSize,
                     count ? padded.data() + offset : nullptr, static_cast<int>(count - offset),
-                    pts, AV_NOPTS_VALUE, parser->cur_offset);
-                pts = AV_NOPTS_VALUE;
+                    AV_NOPTS_VALUE, AV_NOPTS_VALUE, -1);
                 // After an explicit frame flush, FFmpeg can first report an
                 // empty boundary while clearing its previous frame-start state.
                 const bool noProgress = !consumed && !outputSize && count;
@@ -57,9 +87,23 @@ public:
                     throw std::runtime_error("Cannot frame HEVC access unit");
                 stalled = noProgress;
                 pending += consumed;
-                if (pending > maxAccessUnit || static_cast<size_t>(outputSize) > maxAccessUnit)
+                if (static_cast<size_t>(outputSize) > pending || static_cast<size_t>(outputSize) > maxAccessUnit ||
+                    pending - outputSize > maxAccessUnit)
                     throw std::runtime_error("HEVC access unit exceeds 64 MiB");
-                if (outputSize) { pending = 0; emit(output, outputSize, parser->pts); }
+                // Follow only consumed bytes: next-AU lookahead must not take
+                // this picture's timestamp. Header state survives AU boundaries.
+                track(padded.data() + offset, consumed, pts, timestampUsed);
+                if (outputSize) {
+                    pending -= outputSize;
+                    emit(output, outputSize, picturePts != AV_NOPTS_VALUE ? picturePts : leadingPts);
+                    pictureSeen = false;
+                    picturePts = leadingPts = AV_NOPTS_VALUE;
+                    // A start code split across packets may already have been
+                    // consumed. Carry only those bounded lookahead bytes' PTS.
+                    for (size_t j = headerPts.size() - std::min(pending, headerPts.size()); j < headerPts.size(); ++j)
+                        if (headerPts[(head + j) % headerPts.size()] != AV_NOPTS_VALUE)
+                            leadingPts = headerPts[(head + j) % headerPts.size()];
+                }
                 offset += consumed;
             } while (offset < count);
             if (count) data += count;
