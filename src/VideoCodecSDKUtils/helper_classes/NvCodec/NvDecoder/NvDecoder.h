@@ -27,6 +27,7 @@
 
 #include <assert.h>
 #include <deque>
+#include "HevcChroma.h"
 #include <stdint.h>
 #include <mutex>
 #include <vector>
@@ -93,6 +94,7 @@ struct Dim {
 struct FrameColorInfo {
     uint8_t matrix_coefficients = 2; // CICP unspecified; preserve all explicit values.
     bool video_full_range_flag = false;
+    uint8_t chroma_location = 0; // AVChromaLocation; unknown unless parsed from HEVC.
 };
 
 /**
@@ -528,6 +530,7 @@ private:
     // Color descriptions follow the same output slots as frames and timestamps.
     std::vector<FrameColorInfo> m_vColorInfo;
     FrameColorInfo m_pictureColorInfo[MAX_FRM_CNT];
+    HevcChroma m_hevcChroma;
     // collection of locked frames
     std::deque<uint8_t*> m_LockedFrames;
     // collection of locked events

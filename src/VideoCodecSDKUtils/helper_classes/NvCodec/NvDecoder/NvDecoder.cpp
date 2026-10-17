@@ -752,7 +752,9 @@ int NvDecoder::HandlePictureDecode(CUVIDPICPARAMS *pPicParams) {
     // A newer sequence can arrive before this picture's display callback.
     const auto& signal = m_videoFormat.video_signal_description;
     m_pictureColorInfo[pPicParams->CurrPicIdx] = {
-        signal.matrix_coefficients, signal.video_full_range_flag != 0};
+        signal.matrix_coefficients, signal.video_full_range_flag != 0,
+        m_eCodec == cudaVideoCodec_HEVC && !pPicParams->field_pic_flag
+            ? m_hevcChroma.take(pPicParams->pBitstreamData, pPicParams->nBitstreamDataLen) : uint8_t{0}};
     m_nPicNumInDecodeOrder[pPicParams->CurrPicIdx] = m_nDecodePicCnt++;
     CUDA_DRVAPI_CALL(cuCtxPushCurrent(m_cuContext));
     NVDEC_API_CALL(m_api.cuvidDecodePicture(m_hDecoder, pPicParams));
@@ -1196,7 +1198,14 @@ int NvDecoder::Decode(const uint8_t *pData, int nSize, int nFlags, int64_t nTime
     if ((!pData || nSize == 0) && (nFlags != CUVID_PKT_DISCONTINUITY)){
         packet.flags |= CUVID_PKT_ENDOFSTREAM;
     }
-    NVDEC_API_CALL(m_api.cuvidParseVideoData(m_hParser, &packet));
+    if (m_eCodec == cudaVideoCodec_HEVC) {
+        if (packet.flags & CUVID_PKT_DISCONTINUITY) m_hevcChroma.reset();
+        m_hevcChroma.feed(pData, nSize > 0 ? static_cast<size_t>(nSize) : 0,
+            (packet.flags & (CUVID_PKT_ENDOFSTREAM | CUVID_PKT_ENDOFPICTURE)) != 0);
+    }
+    const auto parseResult = m_api.cuvidParseVideoData(m_hParser, &packet);
+    if (parseResult != CUDA_SUCCESS) m_hevcChroma.reset();
+    NVDEC_API_CALL(parseResult);
 
     return m_nDecodedFrame;
 }

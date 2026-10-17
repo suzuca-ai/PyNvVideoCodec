@@ -144,6 +144,7 @@ struct DecodedFrame
     int64_t timestamp;
     uint8_t matrixCoefficients = 2;
     bool videoFullRangeFlag = false;
+    uint8_t chromaLocation = 0;
     std::vector<CAIMemoryView> views;
     Pixel_Format format;
     std::shared_ptr<ExternalBuffer> extBuf;

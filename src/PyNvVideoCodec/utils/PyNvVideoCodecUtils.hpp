@@ -128,6 +128,7 @@ inline DecodedFrame GetCAIMemoryViewAndDLPack(const NvDecoder* decoder, std::tup
     frame.decoderStream = reinterpret_cast<size_t>(decoder->GetStream());
     frame.matrixCoefficients = std::get<4>(tup).matrix_coefficients;
     frame.videoFullRangeFlag = std::get<4>(tup).video_full_range_flag;
+    frame.chromaLocation = std::get<4>(tup).chroma_location;
     switch (frame.format)
     {
         case Pixel_Format_NV12:

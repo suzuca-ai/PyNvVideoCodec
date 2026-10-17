@@ -31,7 +31,7 @@ Current PyNvVideoCodec version supports following features:
 
 ### **Decoded frame color metadata**
 
-Every `DecodedFrame` exposes two read-only properties describing its input bitstream:
+Every `DecodedFrame` exposes read-only properties describing its input bitstream:
 
 * `matrix_coefficients`: the raw CICP matrix code from NVDEC (1 = BT.709,
   2 = unspecified, 5/6 = BT.601). Other codes, including 0, are preserved.
@@ -43,14 +43,28 @@ whose color description changes without changing resolution. They do not describ
 any RGB conversion requested with `outputcolortype`. Applications choose their
 own policy for unspecified or unsupported matrix codes.
 
+`chroma_location` describes progressive HEVC 4:2:0 input using integer values
+0 = unknown, 1 = left, 2 = center, 3 = top-left, 4 = top, 5 = bottom-left,
+6 = bottom. It follows each picture through display reordering. An absent
+HEVC chroma-location field is inferred as left only after parsing the SPS;
+other codecs, unsupported locations, and unparsed input remain unknown.
+This metadata does not resample pixels. Raw HEVC input must use Annex B.
+
 Known NVDEC limitation: with NVIDIA driver 615.71.09, AV1 full-range bitstreams
 were reported as limited range by the parser, including with a fresh decoder.
 This API preserves the parser result; H.264 and HEVC full-range signaling is
 covered by the regression below.
 
 The NVDEC integration regression can be run with
-`python -m unittest discover -s tests -p 'test_decoded_frame_color.py' -v`.
+`python -m unittest discover -s tests -p 'test_decoded_frame_*.py' -v`.
 It requires an NVIDIA GPU with H.264/HEVC decode support and FFmpeg with libx264/libx265.
+
+The standalone metadata parser also has CPU tests (no CUDA required):
+
+```sh
+g++ -std=c++17 -I src/VideoCodecSDKUtils/helper_classes/NvCodec/NvDecoder tests/native/test_hevc_chroma.cpp -o /tmp/test_hevc_chroma
+/tmp/test_hevc_chroma
+```
 
 ### **Encode Features**
 
