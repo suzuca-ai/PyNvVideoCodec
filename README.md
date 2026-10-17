@@ -49,6 +49,8 @@ own policy for unspecified or unsupported matrix codes.
 HEVC chroma-location field is inferred as left only after parsing the SPS;
 other codecs, unsupported locations, and unparsed input remain unknown.
 This metadata does not resample pixels. Raw HEVC input must use Annex B.
+HEVC access units are framed by the existing FFmpeg dependency before NVDEC
+submission; an access unit larger than 64 MiB is rejected.
 
 Known NVDEC limitation: with NVIDIA driver 615.71.09, AV1 full-range bitstreams
 were reported as limited range by the parser, including with a fresh decoder.
@@ -62,8 +64,10 @@ It requires an NVIDIA GPU with H.264/HEVC decode support and FFmpeg with libx264
 The standalone metadata parser also has CPU tests (no CUDA required):
 
 ```sh
-g++ -std=c++17 -I src/VideoCodecSDKUtils/helper_classes/NvCodec/NvDecoder tests/native/test_hevc_chroma.cpp -o /tmp/test_hevc_chroma
-/tmp/test_hevc_chroma
+g++ -std=c++17 -I src/VideoCodecSDKUtils/helper_classes/NvCodec/NvDecoder \
+  -I external/ffmpeg/include tests/native/test_hevc_chroma.cpp \
+  -L external/ffmpeg/lib/x86_64 -lavcodec -lavutil -o /tmp/test_hevc_chroma
+LD_LIBRARY_PATH=external/ffmpeg/lib/x86_64 /tmp/test_hevc_chroma
 ```
 
 ### **Encode Features**

@@ -6,10 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <deque>
-#include <memory>
 #include <vector>
-#include <utility>
 
 // HEVC Annex B metadata only. Values match AVChromaLocation: unknown=0,
 // left=1, center=2, top-left=3, top=4, bottom-left=5, bottom=6.
@@ -47,22 +44,14 @@ class HevcChroma {
                 if (++zeros > 31) { valid = false; return 0; }
             }
             const uint32_t result = ((uint32_t{1} << zeros) - 1) + read(zeros);
-            if (result > maximum) valid = false;
+            if (!valid || result > maximum) { valid = false; return 0; }
             return result;
         }
     };
 
-    struct Picture {
-        std::vector<uint8_t> prefix;
-        uint8_t location;
-    };
     std::array<uint8_t, 16> sps{};
     std::array<int, 64> pps;
-    std::deque<std::shared_ptr<Picture>> pictures;
-    std::shared_ptr<Picture> currentPicture;
     std::vector<uint8_t> nal;
-    unsigned zeros = 0;
-    bool inNal = false;
 
     void readParameterSet() {
         if (nal.size() < 3 || (nal[0] & 0x81) || (nal[1] & 0xf8) || !(nal[1] & 7)) return;
@@ -149,49 +138,37 @@ class HevcChroma {
         if (b.valid && chroma == 1) sps[id] = location;
     }
 
-    void queuePicture() {
-        if (currentPicture) {
-            currentPicture->prefix.assign(nal.begin(), nal.begin() + std::min(nal.size(), size_t{32}));
-            return;
-        }
-        if (nal.size() < 3 || ((nal[0] >> 1) & 63) > 31) return;
-        Bits b(nal);
-        if (!b.read(1)) return; // Only the first slice identifies a new picture.
+    uint8_t pictureLocation() {
+        if (nal.size() < 3 || (nal[0] & 0x81) || (nal[1] & 0xf8) || !(nal[1] & 7)) return 0;
         const unsigned type = (nal[0] >> 1) & 63;
+        if (type > 31) return 0;
+        Bits b(nal);
+        if (!b.read(1)) return 0;
         if (type >= 16 && type <= 23) b.skip(1);
         const auto id = b.ue(63);
-        if (!b.valid) return;
-        uint8_t location = 0;
-        if (!(nal[0] & 0x81) && !(nal[1] & 0xf8) && (nal[1] & 7) && pps[id] >= 0)
-            location = sps[pps[id]];
-        currentPicture = std::make_shared<Picture>(Picture{
-            std::vector<uint8_t>(nal.begin(), nal.begin() + std::min(nal.size(), size_t{32})), location});
-        pictures.push_back(currentPicture);
-    }
-
-    void finishNal() {
-        readParameterSet();
-        queuePicture();
-        nal.clear();
-        currentPicture.reset();
+        return b.valid && pps[id] >= 0 ? sps[pps[id]] : 0;
     }
 
 public:
     HevcChroma() { pps.fill(-1); }
-    void reset() { *this = HevcChroma(); }
+    void reset() { sps.fill(0); pps.fill(-1); nal.clear(); }
 
-    // Inspect before cuvidParseVideoData; a single packet may contain several
-    // parameter-set replacements. Retain only parameter sets / slice prefixes.
-    void feed(const uint8_t* data, size_t size, bool end = false) {
+    // One complete Annex B access unit, dispatched synchronously to NVDEC.
+    // Only SPS/PPS and a small slice header are retained; never queue pictures.
+    uint8_t parse(const uint8_t* data, size_t size) {
+        uint8_t location = 0;
+        unsigned zeros = 0;
+        bool inNal = false;
+        const auto finish = [&] {
+            readParameterSet();
+            if (!nal.empty() && ((nal[0] >> 1) & 63) <= 31 && nal.size() >= 3 && (nal[2] & 128))
+                location = pictureLocation();
+            nal.clear();
+        };
         for (size_t i = 0; i < size; ++i) {
             const auto byte = data[i];
             if (!byte) { zeros = std::min(zeros + 1, 65536U); continue; }
-            if (byte == 1 && zeros >= 2) {
-                finishNal();
-                inNal = true;
-                zeros = 0;
-                continue;
-            }
+            if (byte == 1 && zeros >= 2) { finish(); inNal = true; zeros = 0; continue; }
             if (inNal) {
                 const size_t limit = nal.size() >= 2 && ((nal[0] >> 1) & 63) <= 31 ? 32 : 65536;
                 while (zeros && nal.size() < limit) { nal.push_back(0); --zeros; }
@@ -199,25 +176,7 @@ public:
             }
             zeros = 0;
         }
-        // Packet boundaries are not NAL boundaries; SPS/PPS wait for a start
-        // code. A complete first-slice prefix is enough for a decode callback.
-        queuePicture();
-        if (end) { finishNal(); inNal = false; zeros = 0; }
-    }
-
-    uint8_t take(const uint8_t* data, size_t size) {
-        // NVDEC's picture bitstream retains Annex B start codes. Match the first
-        // slice too, so a rejected/skipped picture cannot shift later metadata.
-        size_t offset = 0;
-        while (offset < size && data[offset] == 0) ++offset;
-        if (offset >= 2 && offset < size && data[offset] == 1) ++offset;
-        else offset = 0;
-        while (!pictures.empty()) {
-            const auto picture = std::move(pictures.front());
-            pictures.pop_front();
-            if (size - offset >= picture->prefix.size() &&
-                std::equal(picture->prefix.begin(), picture->prefix.end(), data + offset)) return picture->location;
-        }
-        return 0;
+        finish();
+        return location;
     }
 };

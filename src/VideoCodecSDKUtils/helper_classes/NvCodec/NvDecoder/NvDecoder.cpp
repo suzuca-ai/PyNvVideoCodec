@@ -754,7 +754,7 @@ int NvDecoder::HandlePictureDecode(CUVIDPICPARAMS *pPicParams) {
     m_pictureColorInfo[pPicParams->CurrPicIdx] = {
         signal.matrix_coefficients, signal.video_full_range_flag != 0,
         m_eCodec == cudaVideoCodec_HEVC && !pPicParams->field_pic_flag
-            ? m_hevcChroma.take(pPicParams->pBitstreamData, pPicParams->nBitstreamDataLen) : uint8_t{0}};
+            ? m_currentChromaLocation : uint8_t{0}};
     m_nPicNumInDecodeOrder[pPicParams->CurrPicIdx] = m_nDecodePicCnt++;
     CUDA_DRVAPI_CALL(cuCtxPushCurrent(m_cuContext));
     NVDEC_API_CALL(m_api.cuvidDecodePicture(m_hDecoder, pPicParams));
@@ -1198,14 +1198,43 @@ int NvDecoder::Decode(const uint8_t *pData, int nSize, int nFlags, int64_t nTime
     if ((!pData || nSize == 0) && (nFlags != CUVID_PKT_DISCONTINUITY)){
         packet.flags |= CUVID_PKT_ENDOFSTREAM;
     }
-    if (m_eCodec == cudaVideoCodec_HEVC) {
-        if (packet.flags & CUVID_PKT_DISCONTINUITY) m_hevcChroma.reset();
-        m_hevcChroma.feed(pData, nSize > 0 ? static_cast<size_t>(nSize) : 0,
-            (packet.flags & (CUVID_PKT_ENDOFSTREAM | CUVID_PKT_ENDOFPICTURE)) != 0);
+    if (m_eCodec != cudaVideoCodec_HEVC) {
+        NVDEC_API_CALL(m_api.cuvidParseVideoData(m_hParser, &packet));
+        return m_nDecodedFrame;
     }
-    const auto parseResult = m_api.cuvidParseVideoData(m_hParser, &packet);
-    if (parseResult != CUDA_SUCCESS) m_hevcChroma.reset();
-    NVDEC_API_CALL(parseResult);
+    try {
+        if (packet.flags & CUVID_PKT_DISCONTINUITY) {
+            m_hevcChroma.reset();
+            m_hevcAccessUnits.reset();
+            CUVIDSOURCEDATAPACKET discontinuity = {};
+            discontinuity.flags = CUVID_PKT_DISCONTINUITY;
+            NVDEC_API_CALL(m_api.cuvidParseVideoData(m_hParser, &discontinuity));
+        }
+        m_hevcAccessUnits.feed(pData, pData && nSize > 0 ? static_cast<size_t>(nSize) : 0, nTimestamp,
+            (packet.flags & (CUVID_PKT_ENDOFSTREAM | CUVID_PKT_ENDOFPICTURE)) != 0,
+            [&](const uint8_t* data, int size, int64_t pts) {
+                CUVIDSOURCEDATAPACKET picture = {};
+                picture.payload = data;
+                picture.payload_size = size;
+                picture.flags = CUVID_PKT_ENDOFPICTURE;
+                if (pts != AV_NOPTS_VALUE) { picture.flags |= CUVID_PKT_TIMESTAMP; picture.timestamp = pts; }
+                m_currentChromaLocation = m_hevcChroma.parse(data, size);
+                // Decode callbacks run before this parse returns, even if a picture is rejected.
+                NVDEC_API_CALL(m_api.cuvidParseVideoData(m_hParser, &picture));
+                m_currentChromaLocation = 0;
+            });
+        if (packet.flags & CUVID_PKT_ENDOFSTREAM) {
+            packet.payload = nullptr;
+            packet.payload_size = 0;
+            packet.flags &= CUVID_PKT_ENDOFSTREAM | CUVID_PKT_NOTIFY_EOS;
+            NVDEC_API_CALL(m_api.cuvidParseVideoData(m_hParser, &packet));
+        }
+    } catch (...) {
+        m_currentChromaLocation = 0;
+        m_hevcChroma.reset();
+        m_hevcAccessUnits.reset();
+        throw;
+    }
 
     return m_nDecodedFrame;
 }

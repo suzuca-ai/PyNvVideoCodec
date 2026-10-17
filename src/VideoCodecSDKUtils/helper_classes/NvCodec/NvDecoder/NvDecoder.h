@@ -28,6 +28,7 @@
 #include <assert.h>
 #include <deque>
 #include "HevcChroma.h"
+#include "HevcAccessUnits.h"
 #include <stdint.h>
 #include <mutex>
 #include <vector>
@@ -531,6 +532,8 @@ private:
     std::vector<FrameColorInfo> m_vColorInfo;
     FrameColorInfo m_pictureColorInfo[MAX_FRM_CNT];
     HevcChroma m_hevcChroma;
+    HevcAccessUnits m_hevcAccessUnits;
+    uint8_t m_currentChromaLocation = 0;
     // collection of locked frames
     std::deque<uint8_t*> m_LockedFrames;
     // collection of locked events

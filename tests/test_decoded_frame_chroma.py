@@ -5,6 +5,8 @@
 import ctypes
 import shutil
 import subprocess
+import tempfile
+from pathlib import Path
 import unittest
 
 
@@ -70,6 +72,37 @@ class DecodedFrameChromaTest(unittest.TestCase):
 
     def test_get_frame(self):
         self.check_decode(733, get_frame=True)
+
+    def test_timestamps(self):
+        # Demuxed access units have non-monotonic PTS in decode order (B-frames).
+        with tempfile.TemporaryDirectory() as directory:
+            raw, video = Path(directory) / "input.hevc", Path(directory) / "input.mp4"
+            raw.write_bytes(self.sequences[2])
+            subprocess.run([
+                "ffmpeg", "-hide_banner", "-loglevel", "error", "-fflags", "+genpts",
+                "-i", str(raw), "-c", "copy", str(video),
+            ], check=True, capture_output=True)
+            for fragmented, end_picture in ((False, False), (True, False), (False, True)):
+                with self.subTest(fragmented=fragmented, end_picture=end_picture):
+                    decoder = self.nvc.CreateDecoder(gpuid=0, codec=self.nvc.cudaVideoCodec.HEVC,
+                        cudacontext=0, cudastream=0, usedevicememory=True)
+                    expected, actual = [], []
+                    for packet in self.nvc.CreateDemuxer(filename=str(video)):
+                        if packet.bsl:
+                            expected.append(packet.pts)
+                        data = ctypes.string_at(packet.bsl_data, packet.bsl) if packet.bsl else b""
+                        chunks = [data[:7], data[7:]] if fragmented and data else [data]
+                        for index, chunk in enumerate(chunks):
+                            storage = ctypes.create_string_buffer(chunk) if chunk else None
+                            item = self.nvc.PacketData()
+                            item.bsl_data = ctypes.addressof(storage) if storage else 0
+                            item.bsl = len(chunk)
+                            item.pts = packet.pts if index == 0 else -9223372036854775808
+                            if end_picture and chunk:
+                                item.decode_flag = self.nvc.VideoPacketFlag.ENDOFPICTURE
+                            actual.extend(frame.timestamp for frame in decoder.Decode(item))
+                    actual.extend(frame.timestamp for frame in decoder.Decode(self.nvc.PacketData()))
+                    self.assertEqual(actual, sorted(expected))
 
     def test_discontinuity(self):
         nvc = self.nvc
