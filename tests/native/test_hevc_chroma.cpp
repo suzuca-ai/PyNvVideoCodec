@@ -1,0 +1,177 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 Suzuca Technologies
+// SPDX-License-Identifier: MIT
+#include "HevcChroma.h"
+#include <cassert>
+#include <fstream>
+#include <iostream>
+#include <iterator>
+
+struct Writer {
+    std::vector<uint8_t> bytes;
+    unsigned bit = 0;
+    void put(uint32_t value, unsigned count = 1) {
+        while (count--) {
+            if (!(bit % 8)) bytes.push_back(0);
+            bytes.back() |= ((value >> count) & 1) << (7 - bit++ % 8);
+        }
+    }
+    void ue(uint32_t value) {
+        unsigned width = 0;
+        for (auto n = value + 1; n; n >>= 1) ++width;
+        put(0, width - 1); put(value + 1, width);
+    }
+    std::vector<uint8_t> nal(unsigned type) {
+        put(1);
+        std::vector<uint8_t> out = {0, 0, 1, static_cast<uint8_t>(type << 1), 1};
+        unsigned zeros = 0;
+        for (auto byte : bytes) {
+            if (zeros == 2 && byte <= 3) { out.push_back(3); zeros = 0; }
+            out.push_back(byte);
+            zeros = byte == 0 ? zeros + 1 : 0;
+        }
+        return out;
+    }
+};
+
+static std::vector<uint8_t> sps(int top, int bottom = -2, bool complex = false, bool oversized = false) {
+    Writer w;
+    w.put(0, 4); w.put(0, 3); w.put(1);
+    for (int i = 0; i < 3; ++i) w.put(0, 32);
+    w.ue(0); w.ue(1); w.ue(384); w.ue(256); w.put(0);
+    w.ue(0); w.ue(0); w.ue(4); w.put(0);
+    w.ue(4); w.ue(2); w.ue(0);
+    for (int i = 0; i < 6; ++i) w.ue(0);
+    w.put(complex);
+    if (complex) {
+        w.put(1);
+        for (unsigned size = 0; size < 4; ++size)
+            for (unsigned matrix = 0; matrix < 6; matrix += size == 3 ? 3 : 1) { w.put(0); w.ue(0); }
+    }
+    w.put(1); w.put(1); w.put(complex);
+    if (complex) { w.put(7, 4); w.put(7, 4); w.ue(0); w.ue(0); w.put(0); }
+    w.ue(oversized ? 1 : complex ? 2 : 0);
+    if (oversized) { w.ue(0xfffffffeU); w.ue(0); }
+    if (complex) {
+        w.ue(1); w.ue(0); w.ue(0); w.put(1);
+        w.put(1); w.put(0); w.ue(0); w.put(1); w.put(0); w.put(1);
+    }
+    w.put(complex);
+    if (complex) { w.ue(1); w.put(5, 8); w.put(1); }
+    w.put(1); w.put(1);
+    w.put(top != -2);
+    if (top != -2) {
+        w.put(complex);
+        if (complex) { w.put(255, 8); w.put(1, 16); w.put(1, 16); }
+        w.put(complex); if (complex) w.put(0);
+        w.put(complex);
+        if (complex) { w.put(5, 3); w.put(0); w.put(1); w.put(1, 8); w.put(1, 8); w.put(1, 8); }
+        w.put(top >= 0);
+        if (top >= 0) { w.ue(top); w.ue(bottom == -2 ? top : bottom); }
+        w.put(0, 6); // remaining VUI flags, including absent timing/restrictions
+    }
+    w.put(0); // sps_extension_present_flag
+    return w.nal(33);
+}
+
+static std::vector<uint8_t> pps(unsigned source = 0) {
+    Writer w; w.ue(0); w.ue(source); w.put(0, 7);
+    w.ue(0); w.ue(0); w.ue(0); w.put(0, 3);
+    w.ue(0); w.ue(0); w.put(0, 10); w.ue(0); w.put(0, 2);
+    return w.nal(34);
+}
+static std::vector<uint8_t> slice(unsigned id, bool first = true) {
+    Writer w; w.put(first); w.ue(0); w.put(id, 16); return w.nal(1);
+}
+static void append(std::vector<uint8_t>& dst, const std::vector<uint8_t>& src) { dst.insert(dst.end(), src.begin(), src.end()); }
+
+static void unitTests() {
+    HevcChroma parser;
+    const auto parse = [&](const std::vector<uint8_t>& bytes) {
+        parser.feed(bytes.data(), bytes.size(), true, false, [](const uint8_t*, size_t, bool) {});
+        for (size_t i = 0; i + 6 <= bytes.size(); ++i)
+            if (!bytes[i] && !bytes[i + 1] && bytes[i + 2] == 1 &&
+                ((bytes[i + 3] >> 1) & 63) <= 31 && (bytes[i + 5] & 128))
+                return parser.pictureLocation(bytes.data() + i, bytes.size() - i);
+        return uint8_t{0};
+    };
+    for (bool complex : {false, true}) {
+        for (int value : {-2, -1, 0, 1, 2, 3, 4, 5, 6}) {
+            std::vector<uint8_t> unit;
+            append(unit, sps(value, -2, complex)); append(unit, pps());
+            append(unit, slice(1)); append(unit, slice(999, false));
+            assert(parse(unit) == (value < 0 ? 1 : value <= 5 ? value + 1 : 0));
+        }
+    }
+    parse(sps(0, 1)); assert(parse(slice(1)) == 0);
+    // Byte-identical slices following a skipped picture cannot inherit its VUI.
+    parse(sps(2)); parse(pps()); assert(parse(slice(1)) == 3);
+    parse(sps(5)); assert(parse(slice(1)) == 6);
+    parser.reset(); assert(parse(slice(1)) == 0);
+    auto bad = sps(2); bad.resize(bad.size() - 3);
+    parse(sps(4)); parse(pps()); parse(bad); assert(parse(slice(1)) == 0);
+    parse(sps(4)); parse(pps()); parse(pps(16)); assert(parse(slice(1)) == 0);
+    // Reject replacements damaged after chroma_loc_info, not just its prefix.
+    for (size_t cut = 1; cut <= 8; ++cut) {
+        auto truncated = sps(4); truncated.resize(truncated.size() - cut);
+        parse(sps(2)); parse(pps()); parse(truncated); assert(parse(slice(1)) == 0);
+    }
+    auto trailing = sps(4); trailing.back() ^= 1;
+    parse(sps(2)); parse(pps()); parse(trailing); assert(parse(slice(1)) == 0);
+    auto large = sps(4); large.resize(65540, 0x55);
+    parse(sps(2)); parse(pps()); parse(large); assert(parse(slice(1)) == 0);
+    auto shortPps = pps(); shortPps.pop_back();
+    parse(sps(2)); parse(pps()); parse(shortPps); assert(parse(slice(1)) == 0);
+    parse(pps()); assert(parse(slice(1)) == 3);
+
+    parse(sps(2, -2, false, true)); parse(pps()); assert(parse(slice(1)) == 0);
+    // Deterministic malformed NALs exercise the readers under ASan/UBSan.
+    uint32_t random = 1;
+    for (unsigned i = 0; i < 1000; ++i) {
+        parser.reset();
+        std::vector<uint8_t> garbage = {0, 0, 1, static_cast<uint8_t>((i % 3 == 0 ? 1 : 33 + i % 2) << 1), 1};
+        for (unsigned j = 0; j < i % 256; ++j) {
+            random = random * 1664525 + 1013904223;
+            garbage.push_back(static_cast<uint8_t>(random >> 24));
+        }
+        parse(garbage);
+    }
+    // Fragmented start codes and parameter sets retain only bounded metadata.
+    for (size_t chunk : {size_t{1}, size_t{2}, size_t{7}, size_t{733}}) {
+        parser.reset();
+        std::vector<uint8_t> stream;
+        append(stream, sps(4)); append(stream, pps()); append(stream, slice(1));
+        std::vector<uint8_t> forwarded;
+        auto forward = [&](const uint8_t* data, size_t size, bool) {
+            if (size) forwarded.insert(forwarded.end(), data, data + size);
+        };
+        for (size_t i = 0; i < stream.size(); i += chunk)
+            parser.feed(stream.data() + i, std::min(chunk, stream.size() - i), false, false, forward);
+        parser.feed(nullptr, 0, true, false, forward);
+        assert(stream == forwarded);
+        auto picture = slice(1);
+        assert(parser.pictureLocation(picture.data(), picture.size()) == 5);
+    }
+    // Many tiny slices and a large unterminated payload do not accumulate pictures.
+    std::vector<uint8_t> minimal;
+    for (unsigned i = 0; i < 100000; ++i) append(minimal, slice(i));
+    size_t forwarded = 0;
+    parser.feed(minimal.data(), minimal.size(), true, false,
+        [&](const uint8_t*, size_t size, bool) { forwarded += size; });
+    assert(forwarded == minimal.size());
+    // The complete-picture path forwards the original payload in one borrowed span.
+    auto picture = slice(1); picture.resize(4 * 1024 * 1024, 0x55);
+    for (bool complete : {false, true}) {
+        unsigned calls = 0;
+        parser.feed(picture.data(), picture.size(), true, complete,
+            [&](const uint8_t* data, size_t size, bool last) {
+                assert(data == picture.data() && size == picture.size() && last); ++calls;
+            });
+        assert(calls == 1);
+        assert(parser.pictureLocation(picture.data(), picture.size()) == 5);
+    }
+}
+
+int main() {
+    av_log_set_level(AV_LOG_QUIET);
+    unitTests();
+}

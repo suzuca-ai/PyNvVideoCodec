@@ -76,6 +76,7 @@ class DecodedFrameColorTest(unittest.TestCase):
             for frame in decoded:
                 self.assertIsInstance(frame.matrix_coefficients, int)
                 self.assertIsInstance(frame.video_full_range_flag, bool)
+                self.assertEqual(frame.chroma_location, 1 if codec == "hevc" else 0)
                 snapshots.append((frame.matrix_coefficients, frame.video_full_range_flag))
             frames.extend(decoded)
         expected = [color for color in self.colors for _ in range(self.frames_per_sequence)]

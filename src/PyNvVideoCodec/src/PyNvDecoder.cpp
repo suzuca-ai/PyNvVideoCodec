@@ -432,6 +432,9 @@ void Init_PyNvDecoder(py::module& m)
             "Input bitstream CICP matrix coefficient code (2 means unspecified).")
         .def_readonly("video_full_range_flag", &DecodedFrame::videoFullRangeFlag,
             "Input bitstream full-range flag; false when unspecified.")
+        .def_readonly("chroma_location", &DecodedFrame::chromaLocation,
+            "Input HEVC chroma location: 0 unknown, 1 left, 2 center, 3 top-left, "
+            "4 top, 5 bottom-left, 6 bottom. Other codecs return unknown.")
         .def_readonly("decoder_stream_event", &DecodedFrame::decoderStreamEvent)
         .def("__repr__",
             [](std::shared_ptr<DecodedFrame>& self)
