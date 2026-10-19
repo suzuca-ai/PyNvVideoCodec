@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 Suzuca Technologies
 // SPDX-License-Identifier: MIT
 #include "HevcChroma.h"
-#include "HevcAccessUnits.h"
 #include <cassert>
 #include <fstream>
 #include <iostream>
@@ -87,7 +86,14 @@ static void append(std::vector<uint8_t>& dst, const std::vector<uint8_t>& src) {
 
 static void unitTests() {
     HevcChroma parser;
-    const auto parse = [&](const std::vector<uint8_t>& bytes) { return parser.parse(bytes.data(), bytes.size()); };
+    const auto parse = [&](const std::vector<uint8_t>& bytes) {
+        parser.feed(bytes.data(), bytes.size(), true, false, [](const uint8_t*, size_t, bool) {});
+        for (size_t i = 0; i + 6 <= bytes.size(); ++i)
+            if (!bytes[i] && !bytes[i + 1] && bytes[i + 2] == 1 &&
+                ((bytes[i + 3] >> 1) & 63) <= 31 && (bytes[i + 5] & 128))
+                return parser.pictureLocation(bytes.data() + i, bytes.size() - i);
+        return uint8_t{0};
+    };
     for (bool complex : {false, true}) {
         for (int value : {-2, -1, 0, 1, 2, 3, 4, 5, 6}) {
             std::vector<uint8_t> unit;
@@ -129,81 +135,43 @@ static void unitTests() {
         }
         parse(garbage);
     }
-    // No pictures are queued, including a large batch of rejected minimal NALs.
-    HevcAccessUnits units;
+    // Fragmented start codes and parameter sets retain only bounded metadata.
+    for (size_t chunk : {size_t{1}, size_t{2}, size_t{7}, size_t{733}}) {
+        parser.reset();
+        std::vector<uint8_t> stream;
+        append(stream, sps(4)); append(stream, pps()); append(stream, slice(1));
+        std::vector<uint8_t> forwarded;
+        auto forward = [&](const uint8_t* data, size_t size, bool) {
+            if (size) forwarded.insert(forwarded.end(), data, data + size);
+        };
+        for (size_t i = 0; i < stream.size(); i += chunk)
+            parser.feed(stream.data() + i, std::min(chunk, stream.size() - i), false, false, forward);
+        parser.feed(nullptr, 0, true, false, forward);
+        assert(stream == forwarded);
+        auto picture = slice(1);
+        assert(parser.pictureLocation(picture.data(), picture.size()) == 5);
+    }
+    // Many tiny slices and a large unterminated payload do not accumulate pictures.
     std::vector<uint8_t> minimal;
-    for (int i = 0; i < 100000; ++i) append(minimal, slice(1));
-    size_t seen = 0;
-    units.feed(minimal.data(), minimal.size(), 123, true,
-        [&](const uint8_t* data, int size, int64_t) { parser.parse(data, size); ++seen; });
-    assert(seen == 100000);
-    // An unterminated AU is bounded even if no picture can be identified.
-    units.reset();
-    std::vector<uint8_t> zeros(65536);
-    bool rejected = false;
-    try {
-        for (unsigned i = 0; i < 1025; ++i)
-            units.feed(zeros.data(), zeros.size(), 0, false, [](const uint8_t*, int, int64_t) { assert(false); });
-    } catch (const std::runtime_error&) { rejected = true; }
-    assert(rejected);
-    units.reset();
+    for (unsigned i = 0; i < 100000; ++i) append(minimal, slice(i));
+    size_t forwarded = 0;
+    parser.feed(minimal.data(), minimal.size(), true, false,
+        [&](const uint8_t*, size_t size, bool) { forwarded += size; });
+    assert(forwarded == minimal.size());
+    // The complete-picture path forwards the original payload in one borrowed span.
+    auto picture = slice(1); picture.resize(4 * 1024 * 1024, 0x55);
+    for (bool complete : {false, true}) {
+        unsigned calls = 0;
+        parser.feed(picture.data(), picture.size(), true, complete,
+            [&](const uint8_t* data, size_t size, bool last) {
+                assert(data == picture.data() && size == picture.size() && last); ++calls;
+            });
+        assert(calls == 1);
+        assert(parser.pictureLocation(picture.data(), picture.size()) == 5);
+    }
 }
 
-int main(int argc, char** argv) {
+int main() {
     av_log_set_level(AV_LOG_QUIET);
     unitTests();
-    // Real Annex B corpus verifies FFmpeg framing at arbitrary packet boundaries.
-    if (argc == 2) {
-        std::ifstream file(argv[1], std::ios::binary);
-        std::vector<uint8_t> stream{std::istreambuf_iterator<char>(file), {}};
-        std::vector<uint8_t> expected;
-        for (size_t chunk : {size_t{1}, size_t{7}, size_t{733}, stream.size()}) {
-            HevcAccessUnits units;
-            HevcChroma parser;
-            std::vector<uint8_t> actual;
-            auto consume = [&](const uint8_t* data, int size, int64_t) { actual.push_back(parser.parse(data, size)); };
-            for (size_t i = 0; i < stream.size(); i += chunk)
-                units.feed(stream.data() + i, std::min(chunk, stream.size() - i), 0, false, consume);
-            units.feed(nullptr, 0, 0, true, consume);
-            if (expected.empty()) expected = actual;
-            assert(actual == expected);
-        }
-        std::vector<std::vector<uint8_t>> frames;
-        HevcAccessUnits splitter;
-        splitter.feed(stream.data(), stream.size(), 0, true,
-            [&](const uint8_t* data, int size, int64_t) { frames.emplace_back(data, data + size); });
-        for (bool separateHeaders : {false, true}) for (size_t prefix : {size_t{0}, size_t{1}, size_t{2}, size_t{3}, size_t{4}, size_t{5}, size_t{6}, size_t{7}}) {
-            HevcAccessUnits units;
-            std::vector<int64_t> times;
-            auto consume = [&](const uint8_t*, int, int64_t pts) { times.push_back(pts); };
-            for (size_t i = 0; i < frames.size(); ++i) {
-                const auto& frame = frames[i];
-                size_t start = 0;
-                if (separateHeaders) {
-                    for (size_t j = 0; j + 5 < frame.size(); ++j) {
-                        if (!frame[j] && !frame[j + 1] && frame[j + 2] == 1 && ((frame[j + 3] >> 1) & 63) <= 31) {
-                            start = j && !frame[j - 1] ? j - 1 : j;
-                            break;
-                        }
-                    }
-                    if (start) units.feed(frame.data(), start, 0, false, consume);
-                }
-                const auto count = prefix ? std::min(prefix, frame.size() - start) : frame.size() - start;
-                units.feed(frame.data() + start, count, 1000 + i, !prefix, consume);
-                if (start + count < frame.size())
-                    units.feed(frame.data() + start + count, frame.size() - start - count, AV_NOPTS_VALUE, false, consume);
-            }
-            units.feed(nullptr, 0, AV_NOPTS_VALUE, true, consume);
-            assert(times.size() == frames.size());
-            for (size_t i = 0; i < times.size(); ++i)
-                assert(times[i] == 1000 + static_cast<int64_t>(i));
-        }
-        HevcAccessUnits batch;
-        size_t index = 0;
-        batch.feed(stream.data(), stream.size(), 1234, true, [&](const uint8_t*, int, int64_t pts) {
-            assert(pts == (index++ ? AV_NOPTS_VALUE : 1234));
-        });
-        assert(index == frames.size());
-        for (auto value : expected) std::cout << unsigned(value) << '\n';
-    }
 }

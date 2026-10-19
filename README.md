@@ -51,8 +51,14 @@ other codecs, unsupported locations, and unparsed input remain unknown.
 SPS/PPS metadata is accepted only after the existing FFmpeg `hevc_metadata`
 filter validates the complete parameter set, including its termination.
 This metadata does not resample pixels. Raw HEVC input must use Annex B.
-HEVC access units are framed by the existing FFmpeg dependency before NVDEC
-submission; an access unit larger than 64 MiB is rejected.
+NVDEC owns picture framing and timestamps; no additional frame splitter or
+compressed-picture copy is used. With `VideoPacketFlag.ENDOFPICTURE` (one complete
+picture), scanning stops at the first slice: ordinary pictures only read their
+NAL/PPS headers. Fragmented or batched input uses one start-code scan (`memchr`)
+without copying the picture payload. Only received SPS/PPS are fully parsed and
+validated, with at most 64 KiB buffered for one parameter set. Each NVDEC decode
+callback reads at most 32 header bytes to look up the cached location; no picture
+queue or per-picture metadata allocation is needed.
 
 Known NVDEC limitation: with NVIDIA driver 615.71.09, AV1 full-range bitstreams
 were reported as limited range by the parser, including with a fresh decoder.

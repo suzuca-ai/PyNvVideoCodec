@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 extern "C" {
 #include <libavcodec/bsf.h>
@@ -16,27 +17,28 @@ extern "C" {
 // The decoder still owns bitstream validation and picture decoding.
 class HevcChroma {
     struct Bits {
-        std::vector<uint8_t> rbsp;
-        size_t position = 0;
+        const uint8_t* data;
+        size_t size, offset = 2;
+        unsigned remaining = 0, byte = 0, zeros = 0;
         bool valid = true;
-        explicit Bits(const std::vector<uint8_t>& nal) {
-            unsigned zeros = 0;
-            for (size_t i = 2; i < nal.size(); ++i) {
-                const auto byte = nal[i];
-                if (zeros == 2 && byte == 3) { zeros = 0; continue; }
-                rbsp.push_back(byte);
-                zeros = byte == 0 ? zeros + 1 : 0;
-            }
-        }
+        Bits(const uint8_t* data, size_t size) : data(data), size(size) {}
+        explicit Bits(const std::vector<uint8_t>& nal) : Bits(nal.data(), nal.size()) {}
         uint32_t read(unsigned count) {
-            if (count > 32 || position + count > rbsp.size() * 8) {
-                valid = false;
-                return 0;
-            }
+            if (count > 32) { valid = false; return 0; }
             uint32_t result = 0;
-            while (count--) {
-                result = (result << 1) | ((rbsp[position / 8] >> (7 - position % 8)) & 1);
-                ++position;
+            while (count-- && valid) {
+                if (!remaining) {
+                    if (offset == size) { valid = false; return 0; }
+                    byte = data[offset++];
+                    if (zeros == 2 && byte == 3) {
+                        zeros = 0;
+                        if (offset == size) { valid = false; return 0; }
+                        byte = data[offset++];
+                    }
+                    zeros = byte == 0 ? zeros + 1 : 0;
+                    remaining = 8;
+                }
+                result = (result << 1) | ((byte >> --remaining) & 1);
             }
             return result;
         }
@@ -56,7 +58,21 @@ class HevcChroma {
     std::array<int, 64> pps;
     std::vector<uint8_t> nal;
     AVBSFContext* validator = nullptr;
-    bool oversized = false;
+    bool oversized = false, inNal = false;
+    uint8_t tail[2] = {255, 255};
+
+    void collect(const uint8_t* data, size_t size) {
+        const auto prefix = std::min(size, 2 - std::min(nal.size(), size_t{2}));
+        nal.insert(nal.end(), data, data + prefix);
+        data += prefix; size -= prefix;
+        if (nal.size() < 2) return;
+        const unsigned type = (nal[0] >> 1) & 63;
+        if (type != 33 && type != 34) return;
+        const auto count = std::min(size, 65536 - nal.size());
+        nal.insert(nal.end(), data, data + count);
+        oversized |= count != size;
+    }
+
 
     bool validParameterSet() {
         if (oversized) return false;
@@ -168,49 +184,65 @@ class HevcChroma {
         if (b.valid && chroma == 1) sps[id] = location;
     }
 
-    uint8_t pictureLocation() {
-        if (nal.size() < 3 || (nal[0] & 0x81) || (nal[1] & 0xf8) || !(nal[1] & 7)) return 0;
-        const unsigned type = (nal[0] >> 1) & 63;
+public:
+    HevcChroma() { pps.fill(-1); }
+    HevcChroma(const HevcChroma&) = delete;
+    HevcChroma& operator=(const HevcChroma&) = delete;
+    ~HevcChroma() { av_bsf_free(&validator); }
+    void reset() {
+        sps.fill(0); pps.fill(-1); nal.clear(); oversized = inNal = false;
+        tail[0] = tail[1] = 255;
+        av_bsf_free(&validator);
+    }
+
+    // NVDEC supplies the first slice; only its PPS id is read, without allocation.
+    uint8_t pictureLocation(const uint8_t* data, size_t size) const {
+        size = std::min(size, size_t{32});
+        while (size && !*data) { ++data; --size; }
+        if (size && *data == 1) { ++data; --size; }
+        if (size < 3 || (data[0] & 0x81) || (data[1] & 0xf8) || !(data[1] & 7)) return 0;
+        const unsigned type = (data[0] >> 1) & 63;
         if (type > 31) return 0;
-        Bits b(nal);
+        Bits b(data, size);
         if (!b.read(1)) return 0;
         if (type >= 16 && type <= 23) b.skip(1);
         const auto id = b.ue(63);
         return b.valid && pps[id] >= 0 ? sps[pps[id]] : 0;
     }
 
-public:
-    HevcChroma() { pps.fill(-1); }
-    HevcChroma(const HevcChroma&) = delete;
-    HevcChroma& operator=(const HevcChroma&) = delete;
-    ~HevcChroma() { av_bsf_free(&validator); }
-    void reset() { sps.fill(0); pps.fill(-1); nal.clear(); oversized = false; av_bsf_free(&validator); }
-
-    // One complete Annex B access unit, dispatched synchronously to NVDEC.
-    // Only SPS/PPS and a small slice header are retained; never queue pictures.
-    uint8_t parse(const uint8_t* data, size_t size) {
-        uint8_t location = 0;
-        unsigned zeros = 0;
-        bool inNal = false;
-        const auto finish = [&] {
-            readParameterSet();
-            if (!nal.empty() && ((nal[0] >> 1) & 63) <= 31 && nal.size() >= 3 && (nal[2] & 128))
-                location = pictureLocation();
-            nal.clear(); oversized = false;
-        };
-        for (size_t i = 0; i < size; ++i) {
-            const auto byte = data[i];
-            if (!byte) { zeros = std::min(zeros + 1, 65536U); continue; }
-            if (byte == 1 && zeros >= 2) { finish(); inNal = true; zeros = 0; continue; }
-            if (inNal) {
-                const size_t limit = nal.size() >= 2 && ((nal[0] >> 1) & 63) <= 31 ? 32 : 65536;
-                while (zeros && nal.size() < limit) { nal.push_back(0); --zeros; }
-                if (nal.size() < limit) nal.push_back(byte);
-                else if (limit == 65536) oversized = true;
+    // Forward borrowed input to NVDEC. Only SPS/PPS are buffered (64 KiB max).
+    // Split at parameter-set updates so prior decode callbacks see the old cache.
+    // Picture framing, reorder and timestamps remain owned by NVDEC.
+    template<class Forward>
+    void feed(const uint8_t* data, size_t size, bool flush, bool completePicture, Forward forward) {
+        size_t begin = 0, sent = 0, search = 0;
+        while (search < size) {
+            const auto* found = static_cast<const uint8_t*>(std::memchr(data + search, 1, size - search));
+            if (!found) break;
+            const size_t i = found - data;
+            search = i + 1;
+            if ((i ? data[i - 1] : tail[1]) || (i >= 2 ? data[i - 2] : tail[i])) continue;
+            if (inNal) collect(data + begin, i - begin);
+            if (nal.size() >= 2 && (((nal[0] >> 1) & 63) == 33 || ((nal[0] >> 1) & 63) == 34)) {
+                forward(data + sent, i + 1 - sent, false);
+                sent = i + 1;
+                while (!nal.empty() && !nal.back()) nal.pop_back();
+                readParameterSet();
             }
-            zeros = 0;
+            nal.clear(); oversized = false; inNal = true;
+            begin = i + 1;
+            // ENDOFPICTURE guarantees one picture. Parameter sets precede VCL;
+            // skip compressed slice payload entirely in this common packet mode.
+            if (completePicture && begin + 2 <= size && ((data[begin] >> 1) & 63) <= 31) break;
         }
-        finish();
-        return location;
+        if (inNal && size > begin) collect(data + begin, size - begin);
+        if (size >= 2) { tail[0] = data[size - 2]; tail[1] = data[size - 1]; }
+        else if (size) { tail[0] = tail[1]; tail[1] = data[0]; }
+        forward(data ? data + sent : nullptr, size - sent, true);
+        if (flush) {
+            while (!nal.empty() && !nal.back()) nal.pop_back();
+            readParameterSet();
+            nal.clear(); oversized = inNal = false; tail[0] = tail[1] = 255;
+        }
     }
 };

@@ -71,6 +71,21 @@ class DecodedFrameChromaTest(unittest.TestCase):
             with self.subTest(chunk_size=chunk_size):
                 self.check_decode(chunk_size)
 
+    def test_complete_pictures(self):
+        # Exercise the no-payload-scan path across SPS replacements and B-frames.
+        with tempfile.TemporaryDirectory() as directory:
+            video = Path(directory) / "input.hevc"
+            video.write_bytes(b"".join(self.sequences))
+            decoder = self.nvc.CreateDecoder(gpuid=0, codec=self.nvc.cudaVideoCodec.HEVC,
+                cudacontext=0, cudastream=0, usedevicememory=True)
+            actual = []
+            for packet in self.nvc.CreateDemuxer(filename=str(video)):
+                if packet.bsl:
+                    packet.decode_flag = self.nvc.VideoPacketFlag.ENDOFPICTURE
+                actual.extend(frame.chroma_location for frame in decoder.Decode(packet))
+            actual.extend(frame.chroma_location for frame in decoder.Decode(self.nvc.PacketData()))
+            self.assertEqual(actual, self.expected)
+
     def test_get_frame(self):
         self.check_decode(733, get_frame=True)
 
@@ -84,7 +99,7 @@ class DecodedFrameChromaTest(unittest.TestCase):
                 "-i", str(raw), "-c", "copy", str(video),
             ], check=True, capture_output=True)
             for separate_headers in (False, True):
-                for fragmented, end_picture in ((False, False), (True, False), (False, True)):
+                for fragmented, end_picture in [(n, False) for n in range(8)] + [(0, True)]:
                     with self.subTest(headers=separate_headers, fragmented=fragmented, end_picture=end_picture):
                         decoder = self.nvc.CreateDecoder(gpuid=0, codec=self.nvc.cudaVideoCodec.HEVC,
                             cudacontext=0, cudastream=0, usedevicememory=True)
@@ -107,7 +122,7 @@ class DecodedFrameChromaTest(unittest.TestCase):
                                     item.bsl_data, item.bsl, item.pts = ctypes.addressof(header), stop - start, 0
                                     actual.extend(frame.timestamp for frame in decoder.Decode(item))
                                 data = data[first_vcl:]
-                            chunks = [data[:7], data[7:]] if fragmented and data else [data]
+                            chunks = [data[:fragmented], data[fragmented:]] if fragmented and data else [data]
                             for index, chunk in enumerate(chunks):
                                 storage = ctypes.create_string_buffer(chunk) if chunk else None
                                 item = self.nvc.PacketData()
